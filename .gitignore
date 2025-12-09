@@ -9,7 +9,8 @@
 #Ignore logs folder and log files
 /logs
 .log
-
+logs
+platform
 #Ignore lock files
 .lock
 
