@@ -1,0 +1,16 @@
+{
+  "name": "rfdc_app",
+  "type": "HOST",
+  "platform": "/home/charlie/Avnet/Vitis_App/platform/export/platform/platform.xpfm",
+  "domain": "linux_psu_cortexa53",
+  "cpuInstance": "cortex-a53",
+  "cpuType": "cortex-a53",
+  "os": "linux",
+  "sysroot": "/home/charlie/petalinux_sdk_zcu216/sysroots/cortexa72-cortexa53-xilinx-linux",
+  "configuration": {
+    "componentType": "HOST",
+    "hostToolchainConfigurations": []
+  },
+  "domainRealName": "linux_psu_cortexa53",
+  "applicationFlow": "EMBEDDED"
+}
