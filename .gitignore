@@ -18,5 +18,8 @@ rfdc_app/.cache/*
 .pdi
 .peers.ini
 .repo.yaml
+*.obj
 .vitisWorkspace.json
+/platform/*
+/platform/zynqmp_fsbl/build/*
 platform/zynqmp_fsbl/build/*

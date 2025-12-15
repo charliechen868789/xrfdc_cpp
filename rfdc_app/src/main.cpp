@@ -14,25 +14,31 @@
 #include <iostream>
 #include <cstdlib>
 
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[]) 
+{
     // Parse command line arguments (if any)
     std::string app_name = "RF Data Converter Application";
     if (argc > 1) {
         app_name = argv[1];
     }
     
-    try {
+    try 
+    {
         // Create and run the application
         RfDcApp app(app_name);
         app.run();
         
         return EXIT_SUCCESS;
         
-    } catch (const std::exception& e) {
+    } 
+    catch (const std::exception& e) 
+    {
         std::cerr << "\nFatal Error: " << e.what() << "\n";
         std::cerr << "Application terminated.\n";
         return EXIT_FAILURE;
-    } catch (...) {
+    } 
+    catch (...) 
+    {
         std::cerr << "\nUnknown fatal error occurred.\n";
         std::cerr << "Application terminated.\n";
         return EXIT_FAILURE;

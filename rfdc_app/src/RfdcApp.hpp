@@ -4,6 +4,10 @@
 #include <fstream>
 #include <array>
 #include <vector>
+#include <random>
+#include <algorithm>
+#include <iostream>
+#include <cmath>
 #include "rfdc_wrapper/RfDc.hpp"
 #include "rfdc_wrapper/RfClock.hpp"
 #include "gpio.hpp"
@@ -126,9 +130,10 @@ private:
     // Test methods
     void run_loopback_test();
     void display_status();
-    void save_samples_to_csv(const std::vector<int16_t>& samples, 
+    void save_samples_to_csv(const std::vector<int16_t>& samples,
                             double sample_rate_hz,
-                            const std::string& filename);
+                            const std::string& filename,
+                            const std::string& metadata = "");
     
     // Data transfer helper methods
     void write_dac_samples(uint32_t tile, uint32_t block,
@@ -136,10 +141,14 @@ private:
     std::vector<int16_t> read_adc_samples(uint32_t tile, uint32_t block,
                                           size_t num_samples);
     
-    // Generate test waveforms
-    std::vector<int16_t> generate_sine_wave(double frequency_hz,
-                                            double sample_rate_hz,
-                                            size_t num_samples,
-                                            int16_t amplitude = 30000);
+    // Generate sine wave accounting for DAC interpolation
+    std::vector<int16_t> generate_sine_wave(
+            double frequency_hz,
+            double dac_pll_rate_hz,
+            uint32_t dac_interpolation,
+            size_t num_samples,
+            int16_t amplitude,
+            double noise_dbfs /* = -80.0 */
+    );
     std::vector<int16_t> generate_dc_offset(int16_t value, size_t num_samples);
 };

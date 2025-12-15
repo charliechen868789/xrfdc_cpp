@@ -187,54 +187,36 @@ RfDcApp::RfDcApp(const std::string& name)
     info_.fd = -1;
 }
 
-void RfDcApp::run() {
-    try {
+void RfDcApp::run() 
+{
+    try 
+    {
         std::cout << "Starting RF Data Converter Application...\n\n";
         
         // Initialize GPIO first
         init_gpio();
-        std::cout << "\n✓ finish init_gpio!\n";
-        
         // Initialize clocks
         initialize_clocks();
-        std::cout << "\n✓ finish initialize_clocks!\n";
-        
         // Initialize RFDC
         initialize_rfdc();
-        std::cout << "\n✓ finish initialize_rfdc!\n";
-
-         // **Initialize LocalMem controller**
+        // Initialize LocalMem controller
         local_mem_ = std::make_unique<local_mem::LocalMem>(rfdc_.get());
-        std::cout << "\n✓ finish initialize_local_mem!\n";  
-
-        clock_wiz_ = std::make_unique<clock_wizard::ClockWizard>(rfdc_.get());
-        std::cout << "\n✓ finish initialize_clock_wiz!\n"; 
+        // Initialize the Clock Wizard 
+        clock_wiz_ = std::make_unique<clock_wizard::ClockWizard>(rfdc_.get()); 
         // Initialize memory mapping (for clock wizards)
         initialize_memory_mapping();
-        std::cout << "\n✓ finish initialize_memory_mapping!\n";
-        
-        // **Initialize UIO memory (CRITICAL!) - using RFTool compatible API**
-        if (init_mem() != SUCCESS) {
+        if (init_mem() != SUCCESS)
+        {
             throw std::runtime_error("Failed to initialize UIO memory");
         }
-        std::cout << "\n✓ finish init_mem!\n";
-        
         // Configure tiles
         configure_dac_tiles();
-        std::cout << "\n✓ finish configure_dac_tiles!\n";
-        
         configure_adc_tiles();
-        std::cout << "\n✓ finish configure_adc_tiles!\n";
-        
         initialize_mmcm_adc();
-        std::cout << "\n✓ finish initialize_mmcm_adc!\n";
-        
         initialize_mmcm_dac();
-        std::cout << "\n✓ finish initialize_mmcm_dac!\n";
-        
+
         verify_configuration();
         display_status();
-        
         // Run tests
         run_loopback_test();
         
@@ -244,13 +226,17 @@ void RfDcApp::run() {
         deinit_mem();
         deinit_gpio();
         
-    } catch (const rfdc::RFDCException& e) {
+    } 
+    catch (const rfdc::RFDCException& e) 
+    {
         std::cerr << "\n✗ RFDC Error: " << e.what() 
                   << " (code: " << e.error_code() << ")\n";
         deinit_mem();
         deinit_gpio();
         throw;
-    } catch (const std::exception& e) {
+    } 
+    catch (const std::exception& e) 
+    {
         std::cerr << "\n✗ Error: " << e.what() << "\n";
         deinit_mem();
         deinit_gpio();
@@ -559,14 +545,17 @@ void RfDcApp::init_gpio()
     
     // Initialize DAC user select GPIOs
     std::cout << "  Configuring DAC user select GPIOs...\n";
-    for (uint32_t i = 0; i < max_dac; i++) {
+    for (uint32_t i = 0; i < max_dac; i++) 
+    {
         auto gpio = std::make_unique<gpio::Gpio>(dac_userselect_gpio[i]);
         
-        if (!gpio->enable()) {
+        if (!gpio->enable()) 
+        {
             throw std::runtime_error("Unable to enable DAC user select GPIO " + std::to_string(i));
         }
         
-        if (!gpio->set_direction(gpio::Gpio::Direction::Output)) {
+        if (!gpio->set_direction(gpio::Gpio::Direction::Output)) 
+        {
             throw std::runtime_error("Unable to set direction for DAC user select GPIO " + std::to_string(i));
         }
         
@@ -576,18 +565,22 @@ void RfDcApp::init_gpio()
     
     // Initialize DAC MTS clock enable GPIOs
     std::cout << "  Configuring DAC MTS clock GPIOs...\n";
-    for (uint32_t i = 0; i < MAX_DAC_TILE; i++) {
+    for (uint32_t i = 0; i < MAX_DAC_TILE; i++) 
+    {
         auto gpio = std::make_unique<gpio::Gpio>(dac_mts_clk_en[i]);
         
-        if (!gpio->enable()) {
+        if (!gpio->enable()) 
+        {
             throw std::runtime_error("Unable to enable DAC MTS clock GPIO " + std::to_string(i));
         }
         
-        if (!gpio->set_direction(gpio::Gpio::Direction::Output)) {
+        if (!gpio->set_direction(gpio::Gpio::Direction::Output)) 
+        {
             throw std::runtime_error("Unable to set direction for DAC MTS clock GPIO " + std::to_string(i));
         }
         
-        if (!gpio->set_value(gpio::Gpio::Value::High)) {
+        if (!gpio->set_value(gpio::Gpio::Value::High)) 
+        {
             throw std::runtime_error("Unable to set value for DAC MTS clock GPIO " + std::to_string(i));
         }
         
@@ -597,18 +590,22 @@ void RfDcApp::init_gpio()
     
     // Initialize ADC MTS clock enable GPIOs
     std::cout << "  Configuring ADC MTS clock GPIOs...\n";
-    for (uint32_t i = 0; i < MAX_ADC_TILE; i++) {
+    for (uint32_t i = 0; i < MAX_ADC_TILE; i++) 
+    {
         auto gpio = std::make_unique<gpio::Gpio>(adc_mts_clk_en[i]);
         
-        if (!gpio->enable()) {
+        if (!gpio->enable()) 
+        {
             throw std::runtime_error("Unable to enable ADC MTS clock GPIO " + std::to_string(i));
         }
         
-        if (!gpio->set_direction(gpio::Gpio::Direction::Output)) {
+        if (!gpio->set_direction(gpio::Gpio::Direction::Output)) 
+        {
             throw std::runtime_error("Unable to set direction for ADC MTS clock GPIO " + std::to_string(i));
         }
         
-        if (!gpio->set_value(gpio::Gpio::Value::High)) {
+        if (!gpio->set_value(gpio::Gpio::Value::High)) 
+        {
             throw std::runtime_error("Unable to set value for ADC MTS clock GPIO " + std::to_string(i));
         }
         
@@ -620,23 +617,26 @@ void RfDcApp::init_gpio()
     std::cout << "  Configuring ADC AXI switch reset GPIO...\n";
     adc_axiswitch_reset_gpio_ = std::make_unique<gpio::Gpio>(adc_axiswitchrst);
     
-    if (!adc_axiswitch_reset_gpio_->enable()) {
+    if (!adc_axiswitch_reset_gpio_->enable())
+    {
         throw std::runtime_error("Unable to enable ADC AXI switch reset GPIO");
     }
     
-    if (!adc_axiswitch_reset_gpio_->set_direction(gpio::Gpio::Direction::Output)) {
+    if (!adc_axiswitch_reset_gpio_->set_direction(gpio::Gpio::Direction::Output)) 
+    {
         throw std::runtime_error("Unable to set direction for ADC AXI switch reset GPIO");
     }
     
-    if (!adc_axiswitch_reset_gpio_->set_value(gpio::Gpio::Value::High)) {
+    if (!adc_axiswitch_reset_gpio_->set_value(gpio::Gpio::Value::High)) 
+    {
         throw std::runtime_error("Unable to set value for ADC AXI switch reset GPIO");
     }
     std::cout << "  ✓ ADC AXI switch reset GPIO initialized\n";
-    
     std::cout << "  ✓ All GPIO pins configured successfully\n\n";
 }
 
-void RfDcApp::deinit_gpio() {
+void RfDcApp::deinit_gpio() 
+{
     std::cout << "\n━━━ Cleaning up GPIO Pins ━━━\n";
     
     // Clear all GPIO vectors - destructors will handle cleanup
@@ -650,7 +650,8 @@ void RfDcApp::deinit_gpio() {
 
 // ===== Clock Initialization =====
 
-void RfDcApp::initialize_clocks() {
+void RfDcApp::initialize_clocks() 
+{
     std::cout << "━━━ Initializing RF Clocks ━━━\n";
     
     try {
@@ -853,7 +854,6 @@ void RfDcApp::configure_dac_tiles()
         }
         
         // **CRITICAL: Reprogram MMCM after configuration changes**
-        // **CRITICAL: Reprogram MMCM after configuration changes**
         std::cout << "    • Reprogramming MMCM...\n";
         if (!clock_wiz_->program_mmcm(rfdc::TileType::DAC, tile)) {
             std::cerr << "    ✗ MMCM programming failed\n";
@@ -977,7 +977,7 @@ void RfDcApp::verify_configuration() {
         
         // Get PLL configuration
         auto pll = rfdc_->get_pll_config(rfdc::TileType::DAC, tile);
-        std::cout << std::fixed << std::setprecision(2)
+        std::cout << std::fixed << std::setprecision(4)
                  << "    Ref Clock: " << pll.ref_clk_freq() << " MHz\n"
                  << "    Sample Rate: " << pll.sample_rate() << " MSPS\n";
         
@@ -1004,7 +1004,7 @@ void RfDcApp::verify_configuration() {
         
         // Get PLL configuration
         auto pll = rfdc_->get_pll_config(rfdc::TileType::ADC, tile);
-        std::cout << std::fixed << std::setprecision(2)
+        std::cout << std::fixed << std::setprecision(4)
                  << "    Ref Clock: " << pll.ref_clk_freq() << " MHz\n"
                  << "    Sample Rate: " << pll.sample_rate() << " MSPS\n";
         
@@ -1111,86 +1111,107 @@ void RfDcApp::run_loopback_test() {
     std::cout << "  (Loopback cable connected)\n\n";
     
     try {
-        const double sample_rate = 7.86432e9;  // 7.86432 GSPS
-        const size_t num_samples = 16384;
-        const double test_frequency = 25e6;  // 100 MHz test tone
-        
         const uint32_t tile = 0;
         const uint32_t block = 0;
-        const uint32_t channel_mask = 0x0001;  // Only block 0
+        const uint32_t channel_mask = 0x0001;
+        const size_t num_samples = 16384;
+        const double test_frequency = 300e6;  // 50 MHz
         
-        // ===== DAC PLAYBACK SEQUENCE (RFTool exact order) =====
+        // Get DAC configuration
+        auto dac_pll = rfdc_->get_pll_config(rfdc::TileType::DAC, tile);
+        double dac_pll_rate_hz = dac_pll.sample_rate() * 1e9;
+        uint32_t dac_interpolation = rfdc_->get_interpolation_factor(tile, block);
+        
+        // Get ADC configuration
+        auto adc_pll = rfdc_->get_pll_config(rfdc::TileType::ADC, tile);
+        double adc_pll_rate_hz = adc_pll.sample_rate() * 1e9;
+        uint32_t adc_decimation = rfdc_->get_decimation_factor(tile, block);
+        
+        std::cout << "Configuration:\n";
+        std::cout << "  DAC PLL Rate: " << dac_pll.sample_rate() << " GSPS\n";
+        std::cout << "  DAC Interpolation: " << dac_interpolation << "x\n";
+        std::cout << "  ADC PLL Rate: " << adc_pll.sample_rate() << " GSPS\n";
+        std::cout << "  ADC Decimation: " << adc_decimation << "x\n\n";
+        
+        // ===== DAC PLAYBACK SEQUENCE =====
         std::cout << "━━━ DAC Tile 0 Block 0 Setup ━━━\n";
         
-        // Check PLL lock
         if (!rfdc_->get_pll_lock_status(rfdc::TileType::DAC, tile)) {
             throw std::runtime_error("DAC Tile 0 PLL not locked!");
         }
         std::cout << "  ✓ DAC PLL locked\n";
         
-        // **STEP 1: RESET DAC Memory**
         std::cout << "\n  Step 1: Reset DAC memory\n";
         local_mem_trigger(rfdc::TileType::DAC, tile, num_samples, 0x0000);
         
-        // **STEP 2: SetLocalMemSample - Configure transfer size**
-        std::cout << "  Step 2: Configure sample count (" << num_samples << " samples)\n";
+        std::cout << "  Step 2: Configure sample count\n";
         set_local_mem_sample(rfdc::TileType::DAC, tile, block, num_samples);
         
-        // **STEP 3: Generate sine wave**
-        std::cout << "  Step 3: Generate " << test_frequency/1e6 << " MHz sine wave\n";
-        auto samples = generate_sine_wave(test_frequency, sample_rate, num_samples, 30000);
+        std::cout << "  Step 3: Generate sine wave\n";
+        auto samples = generate_sine_wave(test_frequency, dac_pll_rate_hz, 
+                                         dac_interpolation, num_samples, 30000,-50.0);
         
-        // **STEP 4: Write to BRAM**
         std::cout << "  Step 4: Write samples to DAC BRAM\n";
         write_dac_samples(tile, block, samples);
         
-        // Save for analysis
-        save_samples_to_csv(samples, sample_rate, "dac_t0_b0_100MHz.csv");
-        std::cout << "    ✓ Saved: dac_t0_b0_100MHz.csv\n";
+        // Create DAC metadata
+        std::stringstream dac_meta;
+        dac_meta << "# RFDC DAC Configuration\n";
+        dac_meta << "# type: DAC\n";
+        dac_meta << "# tile: " << tile << "\n";
+        dac_meta << "# block: " << block << "\n";
+        dac_meta << "# pll_rate_mhz: " << (dac_pll_rate_hz / 1e6) << "\n";
+        dac_meta << "# interpolation: " << dac_interpolation << "\n";
+        dac_meta << "# signal_frequency_mhz: " << (test_frequency / 1e6) << "\n";
+        dac_meta << "# num_samples: " << num_samples << "\n";
+        dac_meta << "# amplitude: 30000\n";
         
-        // **STEP 5: TRIGGER DAC PLAYBACK**
+        save_samples_to_csv(samples, dac_pll_rate_hz, "dac_t0_b0_300MHz.csv", dac_meta.str());
+        std::cout << "    ✓ Saved: dac_t0_b0_100MHz.csv (with metadata)\n";
+        
         std::cout << "  Step 5: **TRIGGER DAC playback**\n";
         local_mem_trigger(rfdc::TileType::DAC, tile, num_samples, channel_mask);
         
-        // Wait for playback to stabilize
         std::cout << "    Waiting 200ms for DAC to stabilize...\n";
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        
         std::cout << "  ✓ DAC is now outputting RF signal\n\n";
         
-        // ===== ADC CAPTURE SEQUENCE (RFTool exact order) =====
+        // ===== ADC CAPTURE SEQUENCE =====
         std::cout << "━━━ ADC Tile 0 Block 0 Capture ━━━\n";
         
-        // Check PLL lock
         if (!rfdc_->get_pll_lock_status(rfdc::TileType::ADC, tile)) {
             throw std::runtime_error("ADC Tile 0 PLL not locked!");
         }
         std::cout << "  ✓ ADC PLL locked\n";
         
-        // **STEP 1: SetLocalMemSample for ADC**
-        std::cout << "\n  Step 1: Configure ADC capture size (" << num_samples << " samples)\n";
+        std::cout << "\n  Step 1: Configure ADC capture size\n";
         set_local_mem_sample(rfdc::TileType::ADC, tile, block, num_samples);
         
-        // **STEP 2: TRIGGER ADC CAPTURE**
         std::cout << "  Step 2: **TRIGGER ADC capture**\n";
         local_mem_trigger(rfdc::TileType::ADC, tile, num_samples, channel_mask);
         
-        // Wait for capture to complete
         std::cout << "    Waiting 200ms for capture to complete...\n";
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         
-        // **STEP 3: Read captured data**
         std::cout << "  Step 3: Reading captured data from ADC BRAM\n";
         auto captured = read_adc_samples(tile, block, num_samples);
         
-        // Save to CSV
-        save_samples_to_csv(captured, sample_rate, "adc_t0_b0_capture.csv");
-        std::cout << "    ✓ Saved: adc_t0_b0_capture.csv\n";
+        // Create ADC metadata
+        std::stringstream adc_meta;
+        adc_meta << "# RFDC ADC Configuration\n";
+        adc_meta << "# type: ADC\n";
+        adc_meta << "# tile: " << tile << "\n";
+        adc_meta << "# block: " << block << "\n";
+        adc_meta << "# pll_rate_mhz: " << (adc_pll_rate_hz / 1e6) << "\n";
+        adc_meta << "# decimation: " << adc_decimation << "\n";
+        adc_meta << "# num_samples: " << num_samples << "\n";
+        
+        save_samples_to_csv(captured, adc_pll_rate_hz, "adc_t0_b0_capture.csv", adc_meta.str());
+        std::cout << "    ✓ Saved: adc_t0_b0_capture.csv (with metadata)\n";
         
         // ===== ANALYSIS =====
         std::cout << "\n━━━ Analysis ━━━\n";
         
-        // Print first 32 samples
         std::cout << "  First 32 captured samples:\n    ";
         for (size_t i = 0; i < std::min(size_t(32), captured.size()); ++i) {
             std::cout << captured[i] << " ";
@@ -1198,7 +1219,6 @@ void RfDcApp::run_loopback_test() {
         }
         std::cout << "\n\n";
         
-        // Calculate statistics
         auto max_it = std::max_element(captured.begin(), captured.end());
         auto min_it = std::min_element(captured.begin(), captured.end());
         
@@ -1206,7 +1226,6 @@ void RfDcApp::run_loopback_test() {
         int16_t min_val = (min_it != captured.end()) ? *min_it : 0;
         int16_t peak_to_peak = max_val - min_val;
         
-        // Calculate RMS
         double sum_squares = 0.0;
         for (const auto& sample : captured) {
             sum_squares += sample * sample;
@@ -1219,7 +1238,6 @@ void RfDcApp::run_loopback_test() {
         std::cout << "    Peak-to-Peak:   " << peak_to_peak << " counts\n";
         std::cout << "    RMS:            " << static_cast<int>(rms) << " counts\n";
         
-        // Determine result
         std::cout << "\n━━━ Result ━━━\n";
         if (peak_to_peak > 1000) {
             std::cout << "  ✓✓✓ LOOPBACK SUCCESS! ✓✓✓\n";
@@ -1227,28 +1245,11 @@ void RfDcApp::run_loopback_test() {
             std::cout << "  Expected: ~60000 counts P-P for 30000 amplitude sine wave\n";
             std::cout << "  Measured: " << peak_to_peak << " counts P-P\n";
             std::cout << "\n  System is working correctly!\n";
-        } else if (peak_to_peak > 100) {
-            std::cout << "  ⚠ WEAK SIGNAL DETECTED\n";
-            std::cout << "  Measured: " << peak_to_peak << " counts P-P\n";
-            std::cout << "\n  Possible issues:\n";
-            std::cout << "    - Check cable connection\n";
-            std::cout << "    - Check RF attenuators/gain settings\n";
-            std::cout << "    - Verify clock frequencies match\n";
+            std::cout << "\n  To analyze results (metadata auto-detected):\n";
+            std::cout << "    python3 plot_loopback.py dac_t0_b0_100MHz.csv adc_t0_b0_capture.csv\n";
         } else {
-            std::cout << "  ✗ NO SIGNAL DETECTED\n";
-            std::cout << "  Measured: " << peak_to_peak << " counts P-P (too low)\n";
-            std::cout << "\n  Troubleshooting:\n";
-            std::cout << "    1. Verify /dev/plmem* UIO devices exist:\n";
-            std::cout << "       $ ls -l /dev/plmem*\n";
-            std::cout << "    2. Check loopback cable is connected:\n";
-            std::cout << "       DAC228_T0_CH0 → ADC228_T0_CH0\n";
-            std::cout << "    3. Verify PLL locks shown above\n";
-            std::cout << "    4. Check data in CSV files:\n";
-            std::cout << "       - dac_t0_b0_100MHz.csv (should show sine wave)\n";
-            std::cout << "       - adc_t0_b0_capture.csv (check for noise floor)\n";
-            std::cout << "    5. Verify sysfs settings:\n";
-            std::cout << "       $ cat /sys/class/plmem/plmem0/device/select_mem\n";
-            std::cout << "       (should be 0x1)\n";
+            std::cout << "  ✗ NO/WEAK SIGNAL DETECTED\n";
+            std::cout << "  Measured: " << peak_to_peak << " counts P-P\n";
         }
         
     } catch (const std::exception& e) {
@@ -1256,24 +1257,31 @@ void RfDcApp::run_loopback_test() {
     }
 }
 
-void RfDcApp::save_samples_to_csv(const std::vector<int16_t>& samples, 
-                                   double sample_rate_hz,
-                                   const std::string& filename) {
+void RfDcApp::save_samples_to_csv(const std::vector<int16_t>& samples,
+                                  double sample_rate_hz,
+                                  const std::string& filename,
+                                  const std::string& metadata)
+{
     std::ofstream file(filename);
     if (!file.is_open()) {
-        std::cerr << "  ✗ Failed to open file: " << filename << "\n";
-        return;
+        throw std::runtime_error("Failed to open file for writing: " + filename);
+    }
+    
+    // Write metadata as comments if provided
+    if (!metadata.empty()) {
+        file << metadata;
     }
     
     // Write CSV header
-    file << "sample,value,time_ns\n";
+    file << "sample_index,time_ns,value\n";
     
-    // Write data
+    // Calculate time step
+    double time_step_ns = (1.0 / sample_rate_hz) * 1e9;
+    
+    // Write samples
     for (size_t i = 0; i < samples.size(); ++i) {
-        double time_ns = (i / sample_rate_hz) * 1e9;
-        file << i << "," 
-             << samples[i] << ","
-             << std::fixed << std::setprecision(3) << time_ns << "\n";
+        double time_ns = i * time_step_ns;
+        file << i << "," << time_ns << "," << samples[i] << "\n";
     }
     
     file.close();
@@ -1281,28 +1289,56 @@ void RfDcApp::save_samples_to_csv(const std::vector<int16_t>& samples,
 
 // ===== Waveform Generation Functions =====
 
-std::vector<int16_t> RfDcApp::generate_sine_wave(double frequency_hz,
-                                                 double sample_rate_hz,
-                                                 size_t num_samples,
-                                                 int16_t amplitude)
+std::vector<int16_t> RfDcApp::generate_sine_wave(
+    double frequency_hz,
+    double dac_pll_rate_hz,
+    uint32_t dac_interpolation,
+    size_t num_samples,
+    int16_t amplitude,
+    double noise_dbfs
+)
 {
     std::vector<int16_t> samples(num_samples);
-    
+
+    const double effective_input_rate_hz = dac_pll_rate_hz / dac_interpolation;
     const double two_pi = 2.0 * M_PI;
-    const double phase_increment = two_pi * frequency_hz / sample_rate_hz;
-    
+    const double phase_increment = two_pi * frequency_hz / effective_input_rate_hz;
+
+    // Noise (RMS)
+    const double noise_rms =
+        amplitude * std::pow(10.0, noise_dbfs / 20.0);
+
+    std::default_random_engine rng;
+    std::normal_distribution<double> gaussian(0.0, 1.0);
+
     for (size_t i = 0; i < num_samples; ++i) {
-        double phase = phase_increment * i;
-        double sample = amplitude * sin(phase);
-        samples[i] = static_cast<int16_t>(sample);
+
+        const double phase = phase_increment * static_cast<double>(i);
+        const double sine  = amplitude * std::sin(phase);
+        const double noise = (noise_dbfs < 0.0) ? noise_rms * gaussian(rng) : 0.0;
+
+        double sample = sine + noise;
+
+        // ---- C++14 clamp ----
+        if (sample > 32767.0)
+            sample = 32767.0;
+        else if (sample < -32768.0)
+            sample = -32768.0;
+
+        samples[i] = static_cast<int16_t>(std::lrint(sample));
     }
-    
-    std::cout << "  ✓ Generated " << num_samples << " sample sine wave: "
-              << frequency_hz / 1e6 << " MHz @ "
-              << sample_rate_hz / 1e9 << " GSPS\n";
-    
+
+    std::cout << "  ✓ Generated " << num_samples << " DAC samples\n";
+    std::cout << "      Baseband Frequency:   " << frequency_hz / 1e6 << " MHz\n";
+    std::cout << "      DAC PLL Rate:         " << dac_pll_rate_hz / 1e9 << " GSPS\n";
+    std::cout << "      Interpolation:        " << dac_interpolation << "x\n";
+    std::cout << "      Effective Input Rate: " << effective_input_rate_hz / 1e6 << " MHz\n";
+    std::cout << "      Amplitude:            " << amplitude << " LSB\n";
+    std::cout << "      Noise:                " << noise_dbfs << " dBFS\n";
+
     return samples;
 }
+
 
 std::vector<int16_t> RfDcApp::generate_dc_offset(int16_t value, size_t num_samples)
 {
