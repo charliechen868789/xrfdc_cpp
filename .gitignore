@@ -13,9 +13,10 @@ logs
 platform
 #Ignore lock files
 .lock
-
+rfdc_app/.cache/*
 .bin
 .pdi
 .peers.ini
 .repo.yaml
 .vitisWorkspace.json
+platform/zynqmp_fsbl/build/*

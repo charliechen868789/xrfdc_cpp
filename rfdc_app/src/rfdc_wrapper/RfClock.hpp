@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <array>
+#include <vector>
 
 namespace rfdc {
 // Exception class for RF Clock errors
@@ -90,7 +91,7 @@ public:
 #else
     explicit RFClock(int gpio_id = 0);
 #endif
-    
+    static constexpr uint32_t DEFAULT_RFCLK_LMK_CONFIG =         0;
     /**
      * @brief Cleanup and close RF Clock system
      */
@@ -151,15 +152,9 @@ public:
      * @param lmk_config_id LMK04828 configuration ID
      * @param lmx1_config_id LMX2594_1 configuration ID
      * @param lmx2_config_id LMX2594_2 configuration ID
-     * @param lmx3_config_id LMX2594_3 configuration ID (ZCU111 only)
      */
-#ifdef XPS_BOARD_ZCU111
-    void set_all_configs(uint32_t lmk_config_id, uint32_t lmx1_config_id,
-                        uint32_t lmx2_config_id, uint32_t lmx3_config_id);
-#else
     void set_all_configs(uint32_t lmk_config_id, uint32_t lmx1_config_id,
                         uint32_t lmx2_config_id);
-#endif
     
     /**
      * @brief Control LMK output port enable/disable
@@ -214,7 +209,8 @@ private:
     bool initialized_;
     
     // Helper to check status and throw on error
-    void check_status(uint32_t status, const std::string& operation) const {
+    void check_status(uint32_t status, const std::string& operation) const 
+    {
         if (status != XST_SUCCESS) {
             throw RFClockException(
                 operation + " failed with status: " + std::to_string(status),

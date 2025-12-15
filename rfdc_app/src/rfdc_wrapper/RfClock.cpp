@@ -12,7 +12,8 @@ namespace rfdc
 
     // Helper for formatting error messages
     template<typename... Args>
-    std::string format_string(Args&&... args) {
+    std::string format_string(Args&&... args) 
+    {
         std::ostringstream oss;
         using expander = int[];
         (void)expander{0, ((oss << std::forward<Args>(args)), 0)...};
@@ -20,35 +21,23 @@ namespace rfdc
     }
 
     // Constructor implementations based on platform
-    #if defined XPS_BOARD_ZCU111
-    RFClock::RFClock() : initialized_(false) {
-        auto status = XRFClk_Init();
-        check_status(status, "XRFClk_Init");
-        initialized_ = true;
-    }
-    #elif defined __BAREMETAL__
-    RFClock::RFClock(uint32_t gpio_mux_base_addr) : initialized_(false) {
-        auto status = XRFClk_Init(gpio_mux_base_addr);
-        check_status(status, "XRFClk_Init");
-        initialized_ = true;
-    }
-    #else
-    //use this one for zcu216
-    RFClock::RFClock(int gpio_id) : initialized_(false) {
+    RFClock::RFClock(int gpio_id) : initialized_(false) 
+    {
         auto status = XRFClk_Init(gpio_id);
         check_status(status, "XRFClk_Init");
         initialized_ = true;
         // Configure LMK with default config
         if (XRFClk_SetConfigOnOneChipFromConfigId(
                 RFCLK_LMK,
-                0) != XST_SUCCESS)
+                DEFAULT_RFCLK_LMK_CONFIG) != XST_SUCCESS)
         {
             std::cout << "WARNING: LMK config failed\n" << std::flush;
-        } else {
+        } 
+        else 
+        {
             std::cout << "RFCLK Init Done\n" << std::flush;
         }
     }
-    #endif
 
     RFClock::~RFClock() {
         if (initialized_) {
@@ -69,12 +58,14 @@ namespace rfdc
         return data;
     }
 
-    void RFClock::reset_chip(RFClockChip chip) {
+    void RFClock::reset_chip(RFClockChip chip) 
+    {
         auto status = XRFClk_ResetChip(to_underlying(chip));
         check_status(status, format_string("ResetChip ", to_underlying(chip)));
     }
 
-    void RFClock::set_config(RFClockChip chip, uint32_t config_id) {
+    void RFClock::set_config(RFClockChip chip, uint32_t config_id) 
+    {
         auto status = XRFClk_SetConfigOnOneChipFromConfigId(
             to_underlying(chip),
             config_id
@@ -101,20 +92,9 @@ namespace rfdc
         check_status(status, format_string("GetConfig chip ", to_underlying(chip)));
     }
 
-    #ifdef XPS_BOARD_ZCU111
     void RFClock::set_all_configs(uint32_t lmk_config_id, uint32_t lmx1_config_id,
-                                uint32_t lmx2_config_id, uint32_t lmx3_config_id) {
-        auto status = XRFClk_SetConfigOnAllChipsFromConfigId(
-            lmk_config_id,
-            lmx1_config_id,
-            lmx2_config_id,
-            lmx3_config_id
-        );
-        check_status(status, "SetConfigOnAllChips");
-    }
-    #else
-    void RFClock::set_all_configs(uint32_t lmk_config_id, uint32_t lmx1_config_id,
-                                uint32_t lmx2_config_id) {
+                                uint32_t lmx2_config_id) 
+    {
         auto status = XRFClk_SetConfigOnAllChipsFromConfigId(
             lmk_config_id,
             lmx1_config_id,
@@ -122,9 +102,9 @@ namespace rfdc
         );
         check_status(status, "SetConfigOnAllChips");
     }
-    #endif
 
-    void RFClock::control_lmk_port(LMKPort port, PortState state) {
+    void RFClock::control_lmk_port(LMKPort port, PortState state) 
+    {
         auto status = XRFClk_ControlOutputPortLMK(
             to_underlying(port),
             to_underlying(state)
@@ -144,16 +124,14 @@ namespace rfdc
         check_status(status, format_string("ConfigLMKOutput port ", to_underlying(port)));
     }
 
-    std::string RFClock::get_version() {
+    std::string RFClock::get_version() 
+    {
         return std::string(RFCLK_VERSION);
     }
 
-    BoardType RFClock::get_board_type() {
-    #ifdef XPS_BOARD_ZCU111
-        return BoardType::ZCU111;
-    #else
+    BoardType RFClock::get_board_type() 
+    {
         return BoardType::ZCU216;
-    #endif
     }
 
 } // namespace rfdc

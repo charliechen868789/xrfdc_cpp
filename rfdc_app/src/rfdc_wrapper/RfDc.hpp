@@ -17,7 +17,7 @@
 #include <string>
 #include <memory>
 #include <array>
-
+#include <cmath>
 namespace rfdc {
 
 // Modern type aliases
@@ -127,6 +127,9 @@ public:
     
     MixerType type() const { return static_cast<MixerType>(settings_.MixerType); }
     void set_type(MixerType type) { settings_.MixerType = static_cast<uint8_t>(type); }
+
+    uint32_t coarse_mix_freq() const { return settings_.CoarseMixFreq; }
+    void set_coarse_mix_freq(uint32_t freq) { settings_.CoarseMixFreq = freq; }
     
 private:
     XRFdc_Mixer_Settings settings_{};
@@ -200,6 +203,7 @@ public:
     bool enabled() const { return settings_.Enabled != 0; }
     double ref_clk_freq() const { return settings_.RefClkFreq; }
     double sample_rate() const { return settings_.SampleRate; }
+    double sample_rate_mhz() const { return settings_.SampleRate * 1000.0; }
     uint32_t feedback_div() const { return settings_.FeedbackDivider; }
     uint32_t output_div() const { return settings_.OutputDivider; }
     
@@ -227,26 +231,24 @@ private:
 // RAII wrapper for IP status
 class IPStatus {
 public:
-    IPStatus() = default;
-    
-    XRFdc_IPStatus* get() { return &status_; }
-    const XRFdc_IPStatus* get() const { return &status_; }
-    
+    explicit IPStatus(const XRFdc_IPStatus& st) : status_(st) {}
+
     uint32_t state() const { return status_.State; }
-    
+
     bool dac_tile_enabled(TileId tile) const {
         if (tile > 3) throw RFDCException("Invalid tile ID");
         return status_.DACTileStatus[tile].IsEnabled != 0;
     }
-    
+
     bool adc_tile_enabled(TileId tile) const {
         if (tile > 3) throw RFDCException("Invalid tile ID");
         return status_.ADCTileStatus[tile].IsEnabled != 0;
     }
-    
+
 private:
     XRFdc_IPStatus status_{};
 };
+
 
 // Main RFDC wrapper class
 class RFDC {
@@ -343,13 +345,88 @@ public:
     // Access to underlying instance (for advanced use)
     XRFdc* get_instance() { return &instance_; }
     const XRFdc* get_instance() const { return &instance_; }
+    uint32_t get_ip_type() const { return instance_.RFdc_Config.IPType; }
+    // ===== Memory Mapping Operations =====
+    // Initialize memory mapping for ADC/DAC data buffers and clock wizards
+    void initialize_memory_mapping(
+        uint32_t adc_base_addr,
+        uint32_t dac_base_addr,
+        const std::array<uint32_t, 4>& adc_clk_wiz_addrs,
+        const std::array<uint32_t, 4>& dac_clk_wiz_addrs
+    );
     
+    // Get memory map info (for advanced users)
+    struct ChannelMap {
+        uint32_t addr_I;
+        uint32_t addr_Q;
+        uint32_t Channel_I;
+        uint32_t Channel_Q;
+        
+        ChannelMap() : addr_I(0xFFFFFFFF), addr_Q(0xFFFFFFFF),
+                       Channel_I(0xFFFFFFFF), Channel_Q(0xFFFFFFFF) {}
+    };
+    
+    const std::array<ChannelMap, 16>& get_adc_map() const { return adc_map_; }
+    const std::array<ChannelMap, 16>& get_dac_map() const { return dac_map_; }
+    void* get_adc_vaddr() const { return mem_info_.vaddr_adc; }
+    void* get_dac_vaddr() const { return mem_info_.vaddr_dac; }
+    
+    // Initialize MMCM (clock wizard) for ADC/DAC tiles
+    void initialize_mmcm_adc();
+    void initialize_mmcm_dac();
+
+    void set_mmcm(TileType type, TileId tile_id);
+    bool check_high_speed_adc(TileId tile_id) const;
+
+    // Get calculated MMCM input frequencies
+    const std::array<uint32_t, 8>& get_mmcm_frequencies() const { return mmcm_fin_; }
+
+    // ===== Fabric Interface Operations =====
+    void get_fab_rd_vld_words(TileType type, TileId tile_id, BlockId block_id, uint32_t& words) const;
+    void get_fab_wr_vld_words(TileType type, TileId tile_id, BlockId block_id, uint32_t& words) const;
+
+    void* get_clk_wiz_base(TileType type, TileId tile_id);
+
+    // Get data path mode (Gen3+ only)
+    uint32_t get_data_path_mode(TileId tile_id, BlockId block_id) const;    
 private:
     XRFdc instance_{};
     std::unique_ptr<XRFdc_Config> config_;
     struct metal_device* metal_device_{nullptr};
     
-    // Helper to check status and throw on error
+    // Memory mapping for ADC/DAC data and clock wizards
+    struct MemoryInfo {
+        int fd;                    // /dev/mem file descriptor
+        void* base_adc;           // ADC mmap base
+        void* base_dac;           // DAC mmap base
+        void* vaddr_adc;          // ADC virtual address
+        void* vaddr_dac;          // DAC virtual address
+        uint32_t paddr_adc;       // ADC physical address
+        uint32_t paddr_dac;       // DAC physical address
+        
+        // Clock wizard mappings for each tile
+        void* clk_wiz_adc[4];     // ADC clock wizards
+        void* clk_wiz_dac[4];     // DAC clock wizards
+        
+        MemoryInfo() : fd(-1), base_adc(nullptr), base_dac(nullptr),
+                       vaddr_adc(nullptr), vaddr_dac(nullptr),
+                       paddr_adc(0), paddr_dac(0) {
+            for (int i = 0; i < 4; ++i) {
+                clk_wiz_adc[i] = nullptr;
+                clk_wiz_dac[i] = nullptr;
+            }
+        }
+    };
+    
+    MemoryInfo mem_info_;
+    std::array<ChannelMap, 16> adc_map_;
+    std::array<ChannelMap, 16> dac_map_;
+    std::array<uint32_t, 16> adc_mem_map_;
+    std::array<uint32_t, 16> dac_mem_map_;
+    std::array<uint32_t, 16> adc_init_datatype_;
+    // MMCM input frequencies [0-3: ADC tiles, 4-7: DAC tiles]
+    std::array<uint32_t, 8> mmcm_fin_;
+    // Helper functions
     void check_status(uint32_t status, const std::string& operation) const {
         if (status != XRFDC_SUCCESS) {
             throw RFDCException(
@@ -360,10 +437,19 @@ private:
         }
     }
     
-    // Convert enum to underlying type
     static constexpr uint32_t to_underlying(TileType type) {
         return static_cast<uint32_t>(type);
     }
+    
+    // Memory mapping helpers
+    void cleanup_memory_mapping();
+    void build_channel_maps();
+    // MMCM programming helpers
+    int mmcm_reprogram(TileType type, TileId tile_id,
+                      uint32_t mult, uint32_t frac_mult, uint32_t div,
+                      uint32_t clkout_div, uint32_t clk0_div_frac);
+    uint16_t mmcm_reset(TileType type, TileId tile_id);
+    
 };
 
 } // namespace rfdc

@@ -99,7 +99,10 @@ PRIVATE
     src/rfdc_wrapper/RfClock.cpp
     src/rfdc_wrapper/RfDc.cpp
     src/main.cpp
+    src/LocalMem.cpp
     src/RfdcApp.cpp
+    src/ClockWizard.cpp
+    src/gpio.cpp
 )
 
 set(USER_INCLUDE_DIRECTORIES
