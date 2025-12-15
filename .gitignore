@@ -1,25 +1,30 @@
-# Ignore build output directory
-/build
-/export
+# ==============================
+# Build artifacts (global)
+# ==============================
+build/
+*/build/
+**/build/
 
-# Ignore object files and dependent files
-.o
-.d
+# Object & dependency files
+*.o
+*.obj
+*.d
+*.elf
+*.elf.size
+*.bin
+*.pdi
 
-#Ignore logs folder and log files
-/logs
-.log
-logs
-platform
-#Ignore lock files
-.lock
-rfdc_app/.cache/*
-.bin
-.pdi
+# Logs & caches
+logs/
+*.log
+.cache/
+.vitisWorkspace.json
+
+# ==============================
+# Vitis / Xilinx generated
+# ==============================
+platform/
+export/
 .peers.ini
 .repo.yaml
-*.obj
-.vitisWorkspace.json
-/platform/*
-/platform/zynqmp_fsbl/build/*
-platform/zynqmp_fsbl/build/*
+.lock
