@@ -359,6 +359,30 @@ void RFDC::setup_fifo(TileType type, TileId tile_id, bool enable) {
     check_status(status, format_string("SetupFIFO tile ", tile_id));
 }
 
+// ===== IMR Pass Mode (Gen3+ DAC only) =====
+
+void RFDC::set_imr_pass_mode(TileId tile_id, BlockId block_id, uint32_t mode) {
+    uint32_t status = XRFdc_SetIMRPassMode(
+        const_cast<XRFdc*>(&instance_),
+        tile_id,
+        block_id,
+        mode
+    );
+    check_status(status, "Set IMR pass mode");
+}
+
+uint32_t RFDC::get_imr_pass_mode(TileId tile_id, BlockId block_id) const {
+    uint32_t mode = 0;
+    uint32_t status = XRFdc_GetIMRPassMode(
+        const_cast<XRFdc*>(&instance_),
+        tile_id,
+        block_id,
+        &mode
+    );
+    check_status(status, "Get IMR pass mode");
+    return mode;
+}
+
 bool RFDC::get_fifo_status(TileType type, TileId tile_id) const {
     uint8_t enabled = 0;
     auto status = XRFdc_GetFIFOStatus(

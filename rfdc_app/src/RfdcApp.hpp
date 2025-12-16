@@ -78,6 +78,18 @@ private:
         unsigned int mem_type_adc;
     };
     
+    struct AdcSamples {
+        std::vector<int16_t> I;
+        std::vector<int16_t> Q;
+        bool is_iq = false;
+
+        // Compatibility helpers
+        size_t size() const { return I.size(); }
+        int16_t operator[](size_t i) const { return I[i]; }
+        auto begin() const { return I.begin(); }
+        auto end() const { return I.end(); }
+    };
+
     RfSocInfo info_;
     
     // Memory size constants
@@ -115,6 +127,14 @@ private:
     int read_data_from_memory_bram(uint32_t block_id, int tile_id,
                                     uint32_t size, std::vector<int16_t>& samples);
     
+    int read_adc_bram_rftool_style(
+        uint32_t tile_id,
+        uint32_t block_id,
+        uint32_t size_bytes,
+        AdcSamples& out  // empty in REAL mode
+    );
+    std::vector<int16_t> read_adc_samples(uint32_t tile, uint32_t block,
+                                               size_t num_samples);
     // FIFO control
     int change_fifo_stat(int fifo_id, int tile_id, int stat);
     
@@ -134,13 +154,23 @@ private:
                             double sample_rate_hz,
                             const std::string& filename,
                             const std::string& metadata = "");
-    
+    void save_samples_to_csv(
+        const std::vector<int16_t>& I,
+        const std::vector<int16_t>& Q,
+        double fabric_sample_rate_hz,
+        const std::string& filename,
+        const std::string& metadata
+    );  
     // Data transfer helper methods
     void write_dac_samples(uint32_t tile, uint32_t block,
                           const std::vector<int16_t>& samples);
-    std::vector<int16_t> read_adc_samples(uint32_t tile, uint32_t block,
-                                          size_t num_samples);
-    
+    //std::vector<int16_t> read_adc_samples(uint32_t tile, uint32_t block,
+    //                                      size_t num_samples);
+    //AdcSamples read_adc_samples(
+    //    uint32_t tile,
+    //    uint32_t block,
+    //    size_t num_samples
+    //);
     // Generate sine wave accounting for DAC interpolation
     std::vector<int16_t> generate_sine_wave(
             double frequency_hz,

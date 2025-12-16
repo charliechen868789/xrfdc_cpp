@@ -337,7 +337,6 @@ public:
     
     // ===== Update Event =====
     void update_event(TileType type, TileId tile_id, BlockId block_id, uint32_t event);
-    
     // ===== Utility Functions =====
     void dump_registers(TileType type, int tile_id) const;
     static std::string get_driver_version();
@@ -388,7 +387,11 @@ public:
     void* get_clk_wiz_base(TileType type, TileId tile_id);
 
     // Get data path mode (Gen3+ only)
-    uint32_t get_data_path_mode(TileId tile_id, BlockId block_id) const;    
+    uint32_t get_data_path_mode(TileId tile_id, BlockId block_id) const; 
+
+    // ===== IMR (Image Rejection) Configuration (Gen3+ DAC only) =====
+    void set_imr_pass_mode(TileId tile_id, BlockId block_id, uint32_t mode);
+    uint32_t get_imr_pass_mode(TileId tile_id, BlockId block_id) const;   
 private:
     XRFdc instance_{};
     std::unique_ptr<XRFdc_Config> config_;
