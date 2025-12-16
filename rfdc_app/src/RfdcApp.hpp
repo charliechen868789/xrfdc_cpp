@@ -133,7 +133,7 @@ private:
         uint32_t size_bytes,
         AdcSamples& out  // empty in REAL mode
     );
-    std::vector<int16_t> read_adc_samples(uint32_t tile, uint32_t block,
+    std::vector<int16_t> read_adc_samples_pure_real(uint32_t tile, uint32_t block,
                                                size_t num_samples);
     // FIFO control
     int change_fifo_stat(int fifo_id, int tile_id, int stat);
@@ -164,13 +164,11 @@ private:
     // Data transfer helper methods
     void write_dac_samples(uint32_t tile, uint32_t block,
                           const std::vector<int16_t>& samples);
-    //std::vector<int16_t> read_adc_samples(uint32_t tile, uint32_t block,
-    //                                      size_t num_samples);
-    //AdcSamples read_adc_samples(
-    //    uint32_t tile,
-    //    uint32_t block,
-    //    size_t num_samples
-    //);
+    AdcSamples read_adc_samples_i_q(
+        uint32_t tile,
+        uint32_t block,
+        size_t num_samples
+    );
     // Generate sine wave accounting for DAC interpolation
     std::vector<int16_t> generate_sine_wave(
             double frequency_hz,

@@ -391,7 +391,29 @@ public:
 
     // ===== IMR (Image Rejection) Configuration (Gen3+ DAC only) =====
     void set_imr_pass_mode(TileId tile_id, BlockId block_id, uint32_t mode);
-    uint32_t get_imr_pass_mode(TileId tile_id, BlockId block_id) const;   
+    uint32_t get_imr_pass_mode(TileId tile_id, BlockId block_id) const; 
+    inline const char* to_string(MixerMode m)
+    {
+        switch (m) {
+        case MixerMode::Off: return "OFF";
+        case MixerMode::C2C: return "C2C (IQ -> IQ)";
+        case MixerMode::C2R: return "C2R (IQ -> REAL)";
+        case MixerMode::R2C: return "R2C (REAL -> IQ)";
+        case MixerMode::R2R: return "R2R (REAL -> REAL)";
+        default:             return "UNKNOWN";
+        }
+    };
+
+    inline const char* to_string(MixerType t)
+    {
+        switch (t) {
+        case MixerType::Off:      return "OFF";
+        case MixerType::Coarse:   return "COARSE";
+        case MixerType::Fine:     return "FINE";
+        case MixerType::Disabled: return "DISABLED";
+        default:                  return "UNKNOWN";
+        }
+    };
 private:
     XRFdc instance_{};
     std::unique_ptr<XRFdc_Config> config_;

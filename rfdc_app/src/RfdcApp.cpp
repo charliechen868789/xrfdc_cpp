@@ -600,6 +600,37 @@ int RfDcApp::read_adc_bram_rftool_style(
         (!is_high_speed);
 
     out.is_iq = !is_real;
+    std::cout << "--------------------------------------------------\n";
+    std::cout << "ADC Mixer Status (Tile " << tile
+            << ", Block " << block << ")\n";
+
+    std::cout << "  High-speed ADC : "
+            << (is_high_speed ? "YES" : "NO") << "\n";
+
+    std::cout << "  Mixer Type     : "
+            << rfdc_->to_string(mixer.type()) << "\n";
+
+    std::cout << "  Mixer Mode     : "
+            << rfdc_->to_string(mixer.mode()) << "\n";
+
+    if (mixer.type() == rfdc::MixerType::Fine) {
+        std::cout << "  NCO Frequency  : "
+                << mixer.frequency() << " MHz\n";
+    }
+    else if (mixer.type() == rfdc::MixerType::Coarse) {
+        std::cout << "  Coarse Mixer   : "
+                << (mixer.frequency() == XRFDC_COARSE_MIX_BYPASS
+                    ? "BYPASS"
+                    : "ACTIVE")
+                << "\n";
+    }
+    else {
+        std::cout << "  Mixer Path     : OFF / DISABLED\n";
+    }
+
+    std::cout << "  Data Type      : "
+            << (out.is_iq ? "IQ" : "REAL") << "\n";
+    std::cout << "--------------------------------------------------\n";
 
     // ------------------------------------------------------------
     // 3) Get BRAM addresses from wrapper map
@@ -629,13 +660,11 @@ int RfDcApp::read_adc_bram_rftool_style(
         }
 
         int32_t* src = static_cast<int32_t*>(base);
-        size_t samples = size_bytes / sizeof(int16_t);
+        size_t samples = size_bytes / sizeof(uint32_t);
         out.I.resize(samples);
 
-        for (size_t i = 0; i < samples / 2; ++i) {
-            uint32_t w = src[i];
-            out.I[i * 2]     = int16_t(w & 0xFFFF);
-            out.I[i * 2 + 1] = int16_t((w >> 16) & 0xFFFF);
+        for (size_t i = 0; i < samples; ++i) {
+            out.I[i] = int16_t(src[i] & 0xFFFF);
         }
 
         munmap(base, size_bytes);
@@ -1250,14 +1279,13 @@ void RfDcApp::write_dac_samples(uint32_t tile, uint32_t block,
 }
 
 
-std::vector<int16_t> RfDcApp::read_adc_samples(uint32_t tile, uint32_t block,
+std::vector<int16_t> RfDcApp::read_adc_samples_pure_real(uint32_t tile, uint32_t block,
                                                size_t num_samples)
 {
     std::vector<int16_t> samples;
     uint32_t size_bytes = num_samples * sizeof(int16_t);
     
     int ret = read_data_from_memory_bram(block, tile, size_bytes, samples);
-    //int ret = read_adc_bram_rftool_style(block, tile, size_bytes, samples);
     if (ret != SUCCESS) {
         throw std::runtime_error("Failed to read ADC samples");
     }
@@ -1265,9 +1293,8 @@ std::vector<int16_t> RfDcApp::read_adc_samples(uint32_t tile, uint32_t block,
     return samples;
 }
 
-#if 0
 
-RfDcApp::AdcSamples RfDcApp::read_adc_samples(
+RfDcApp::AdcSamples RfDcApp::read_adc_samples_i_q(
     uint32_t tile,
     uint32_t block,
     size_t num_samples
@@ -1282,7 +1309,7 @@ RfDcApp::AdcSamples RfDcApp::read_adc_samples(
         tile,
         block,
         size_bytes,
-    captured
+        captured
     );
 
     if (ret != SUCCESS) {
@@ -1293,7 +1320,6 @@ RfDcApp::AdcSamples RfDcApp::read_adc_samples(
 
     return captured;
 }
-#endif
 // ===== Test Functions =====
 
 void RfDcApp::run_loopback_test() {
@@ -1459,7 +1485,7 @@ void RfDcApp::run_loopback_test() {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         
         std::cout << "  Step 3: Reading captured data from ADC BRAM\n";
-        auto captured = read_adc_samples(tile, block, num_samples);
+        auto captured = read_adc_samples_i_q(tile, block, num_samples);
         
         // Create ADC metadata with TOTAL decimation
         std::stringstream adc_meta;
@@ -1474,7 +1500,7 @@ void RfDcApp::run_loopback_test() {
         adc_meta << "# signal_frequency_mhz: " << test_frequency << "\n";  // Baseband in BRAM
         adc_meta << "# num_samples: " << num_samples << "\n";
         
-        save_samples_to_csv(captured, adc_pll_rate_hz, "adc_t0_b0_capture.csv", adc_meta.str());
+        save_samples_to_csv(captured.I, adc_pll_rate_hz, "adc_t0_b0_capture.csv", adc_meta.str());
         std::cout << "    ✓ Saved: adc_t0_b0_capture.csv (with metadata)\n";
         
         // ===== ANALYSIS =====
