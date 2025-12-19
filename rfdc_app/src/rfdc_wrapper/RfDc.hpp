@@ -30,6 +30,12 @@ enum class TileType : uint32_t {
     DAC = XRFDC_DAC_TILE
 };
 
+enum class ClockSource : uint8_t
+{
+    External = XRFDC_EXTERNAL_CLK,
+    Internal = XRFDC_INTERNAL_PLL_CLK
+};
+
 enum class MixerMode : uint32_t {
     Off = XRFDC_MIXER_MODE_OFF,
     C2C = XRFDC_MIXER_MODE_C2C,
@@ -78,6 +84,13 @@ enum class ThresholdMode : uint32_t {
 
 enum class DecoderMode : uint32_t {
     Max = 0
+};
+
+enum class DataPathMode : uint32_t {
+    FullNyquistDucPass = XRFDC_DATAPATH_MODE_DUC_0_FSDIVTWO,
+    IMRLowPass   = XRFDC_DATAPATH_MODE_DUC_0_FSDIVFOUR,
+    IMRHighPass     = XRFDC_DATAPATH_MODE_FSDIVFOUR_FSDIVTWO,
+    DUCPass = XRFDC_DATAPATH_MODE_NODUC_0_FSDIVTWO
 };
 
 // Exception class for RFDC errors
@@ -215,18 +228,41 @@ private:
 class BlockStatus {
 public:
     BlockStatus() = default;
-    
+
     XRFdc_BlockStatus* get() { return &status_; }
     const XRFdc_BlockStatus* get() const { return &status_; }
-    
-    double sampling_freq() const { return status_.SamplingFreq; }
-    bool digital_path_clocks_enabled() const { return status_.DataPathClocksStatus != 0; }
-    bool fifo_flags_enabled() const { return status_.IsFIFOFlagsEnabled != 0; }
-    bool fifo_flags_asserted() const { return status_.IsFIFOFlagsAsserted != 0; }
-    
+
+    double sampling_freq() const {
+        return status_.SamplingFreq;
+    }
+
+    // 🔑 REQUIRED for coarse mixer
+    bool digital_datapath_enabled() const {
+        return status_.DigitalDataPathStatus != 0;
+    }
+
+    // Clocks only (not sufficient!)
+    bool digital_path_clocks_enabled() const {
+        return status_.DataPathClocksStatus != 0;
+    }
+
+    bool fifo_flags_enabled() const {
+        return status_.IsFIFOFlagsEnabled != 0;
+    }
+
+    bool fifo_flags_asserted() const {
+        return status_.IsFIFOFlagsAsserted != 0;
+    }
+
+    // Optional but useful
+    uint32_t analog_datapath_status() const {
+        return status_.AnalogDataPathStatus;
+    }
+
 private:
     XRFdc_BlockStatus status_{};
 };
+
 
 // RAII wrapper for IP status
 class IPStatus {
@@ -279,7 +315,7 @@ public:
     bool check_block_enabled(TileType type, TileId tile_id, BlockId block_id) const;
     
     // ===== PLL Operations =====
-    void set_pll_config(TileType type, TileId tile_id, double ref_clk_freq, double sample_rate);
+    void set_pll_config(TileType type, TileId tile_id, rfdc::ClockSource source, double ref_clk_freq, double sample_rate);
     PLLSettings get_pll_config(TileType type, TileId tile_id) const;
     bool get_pll_lock_status(TileType type, TileId tile_id) const;
     
@@ -414,6 +450,16 @@ public:
         default:                  return "UNKNOWN";
         }
     };
+    DataPathMode get_datapath_mode(
+        TileId tile_id,
+        BlockId block_id
+    ) const;
+
+    void set_datapath_mode(
+        TileId tile_id,
+        BlockId block_id,
+        DataPathMode mode
+    );   
 private:
     XRFdc instance_{};
     std::unique_ptr<XRFdc_Config> config_;

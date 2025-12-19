@@ -16,6 +16,7 @@
 #include <vector>
 
 namespace rfdc {
+
 // Exception class for RF Clock errors
 class RFClockException : public std::runtime_error {
 public:

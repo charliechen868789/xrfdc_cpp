@@ -133,6 +133,19 @@ private:
         uint32_t size_bytes,
         AdcSamples& out  // empty in REAL mode
     );
+
+    int read_adc_bram_rftool_style(
+        uint32_t tile,
+        uint32_t block,
+        uint32_t size_bytes,
+        std::vector<uint8_t>& out
+    );
+    int write_dac_bram_rftool_style(
+        uint32_t tile,
+        uint32_t block,
+        uint32_t size_bytes,
+        const std::vector<uint8_t>& data
+    );
     std::vector<int16_t> read_adc_samples_pure_real(uint32_t tile, uint32_t block,
                                                size_t num_samples);
     // FIFO control
@@ -176,7 +189,24 @@ private:
             uint32_t dac_interpolation,
             size_t num_samples,
             int16_t amplitude,
-            double noise_dbfs /* = -80.0 */
+            double noise_dbfs, /* = -80.0 */
+            bool imr_lowpass_enabled
+    );
+
+    std::vector<int16_t> generate_sine_wave_rf(
+        double rf_frequency_hz,      // RF-equivalent frequency (what user expects)
+        double dac_pll_rate_hz,
+        uint32_t dac_interpolation,
+        size_t num_samples,
+        int16_t amplitude,
+        double noise_dbfs,
+        rfdc::DataPathMode datapath
     );
     std::vector<int16_t> generate_dc_offset(int16_t value, size_t num_samples);
+
+    void update_pll_sample_rate(
+        rfdc::TileType type,
+        uint32_t tile,
+        double desired_sample_rate_hz
+    );
 };

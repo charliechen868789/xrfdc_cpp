@@ -136,6 +136,50 @@ BlockStatus RFDC::get_block_status(TileType type, TileId tile_id, BlockId block_
     return status;
 }
 
+
+DataPathMode RFDC::get_datapath_mode(
+    TileId tile_id,
+    BlockId block_id
+) const
+{
+    uint32_t mode = 0;
+
+    auto result = XRFdc_GetDataPathMode(
+        const_cast<XRFdc*>(&instance_),
+        tile_id,
+        block_id,
+        &mode
+    );
+
+    check_status(
+        result,
+        format_string("GetDataPathMode tile ", tile_id,
+                      " block ", block_id)
+    );
+
+    return static_cast<DataPathMode>(mode);
+}
+
+void RFDC::set_datapath_mode(
+    TileId tile_id,
+    BlockId block_id,
+    DataPathMode mode
+)
+{
+    auto result = XRFdc_SetDataPathMode(
+        const_cast<XRFdc*>(&instance_),
+        tile_id,
+        block_id,
+        static_cast<uint32_t>(mode)
+    );
+
+    check_status(
+        result,
+        format_string("SetDataPathMode tile ", tile_id,
+                      " block ", block_id)
+    );
+}
+
 bool RFDC::check_tile_enabled(TileType type, TileId tile_id) const {
     auto status = XRFdc_CheckTileEnabled(
         const_cast<XRFdc*>(&instance_),
@@ -158,12 +202,14 @@ bool RFDC::check_block_enabled(TileType type, TileId tile_id, BlockId block_id) 
 // ===== PLL Operations =====
 
 void RFDC::set_pll_config(TileType type, TileId tile_id, 
-                          double ref_clk_freq, double sample_rate) {
+                          rfdc::ClockSource source,double ref_clk_freq, double sample_rate) 
+{
+    const u8 src = static_cast<u8>(source);
     auto status = XRFdc_DynamicPLLConfig(
         &instance_,
         to_underlying(type),
         tile_id,
-        XRFDC_EXTERNAL_CLK,
+        src,
         ref_clk_freq,
         sample_rate
     );

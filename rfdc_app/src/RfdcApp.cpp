@@ -1,4 +1,5 @@
 #include "RfdcApp.hpp"
+#include <cstdint>
 #include <iostream>
 #include <sstream>
 #include <iomanip>
@@ -559,6 +560,137 @@ int RfDcApp::read_data_from_memory_bram(
     return SUCCESS;
 }
 
+int RfDcApp::write_dac_bram_rftool_style(
+    uint32_t tile,
+    uint32_t block,
+    uint32_t size_bytes,
+    const std::vector<uint8_t>& data
+)
+{
+    std::cout << "[DAC] Write BRAM (RFTOOL style) "
+              << "tile=" << tile
+              << " block=" << block
+              << " bytes=" << size_bytes << "\n";
+
+    if (size_bytes == 0 || data.size() < size_bytes) {
+        std::cerr << "✗ Invalid DAC write size\n";
+        return FAIL;
+    }
+
+    if ((size_bytes % ADC_DAC_SZ_ALIGNMENT) != 0) {
+        std::cerr << "✗ size_bytes must be multiple of "
+                  << ADC_DAC_SZ_ALIGNMENT << "\n";
+        return FAIL;
+    }
+
+    if (size_bytes > FIFO_SIZE) {
+        std::cerr << "✗ size_bytes exceeds FIFO_SIZE\n";
+        return FAIL;
+    }
+
+    const auto& dac_map = rfdc_->get_dac_map();
+    uint32_t idx = tile * 4 + block;
+    uint32_t paddr = dac_map[idx].addr_I;
+
+    if (paddr == 0xFFFFFFFF) {
+        std::cerr << "✗ Invalid DAC BRAM address\n";
+        return FAIL;
+    }
+
+    void* bram = mmap(nullptr,
+                      size_bytes,
+                      PROT_READ | PROT_WRITE,
+                      MAP_SHARED,
+                      info_.fd,
+                      paddr);
+    if (bram == MAP_FAILED) {
+        perror("mmap DAC");
+        return FAIL;
+    }
+
+    // RFTOOL behavior: raw byte copy
+    std::memcpy(bram, data.data(), size_bytes);
+
+    munmap(bram, size_bytes);
+
+    // Enable FIFO (same as RFTOOL)
+    if (change_fifo_stat(XRFDC_DAC_TILE, tile, 1) != SUCCESS) {
+        std::cerr << "✗ Failed to enable DAC FIFO\n";
+        return FAIL;
+    }
+
+    std::cout << "✓ DAC BRAM write done\n";
+    return SUCCESS;
+}
+
+/////////////////////////////////////////////////////////
+
+int RfDcApp::read_adc_bram_rftool_style(
+    uint32_t tile,
+    uint32_t block,
+    uint32_t size_bytes,
+    std::vector<uint8_t>& out
+)
+{
+    std::cout << "[ADC] Read BRAM (RFTOOL style) "
+              << "tile=" << tile
+              << " block=" << block
+              << " bytes=" << size_bytes << "\n";
+
+    out.clear();
+
+    if (size_bytes == 0) {
+        std::cerr << "✗ Invalid ADC read size\n";
+        return FAIL;
+    }
+
+    if ((size_bytes % ADC_DAC_SZ_ALIGNMENT) != 0) {
+        std::cerr << "✗ size_bytes must be multiple of "
+                  << ADC_DAC_SZ_ALIGNMENT << "\n";
+        return FAIL;
+    }
+
+    if (size_bytes > FIFO_SIZE) {
+        std::cerr << "✗ size_bytes exceeds FIFO_SIZE\n";
+        return FAIL;
+    }
+
+    // Enable FIFO (same as RFTOOL)
+    if (change_fifo_stat(XRFDC_ADC_TILE, tile, 1) != SUCCESS) {
+        std::cerr << "✗ Failed to enable ADC FIFO\n";
+        return FAIL;
+    }
+
+    const auto& adc_map = rfdc_->get_adc_map();
+    uint32_t idx = tile * 4 + block;
+    uint32_t paddr = adc_map[idx].addr_I;
+
+    if (paddr == 0xFFFFFFFF) {
+        std::cerr << "✗ Invalid ADC BRAM address\n";
+        return FAIL;
+    }
+
+    void* bram = mmap(nullptr,
+                      size_bytes,
+                      PROT_READ | PROT_WRITE,
+                      MAP_SHARED,
+                      info_.fd,
+                      paddr);
+    if (bram == MAP_FAILED) {
+        perror("mmap ADC");
+        return FAIL;
+    }
+
+    out.resize(size_bytes);
+    std::memcpy(out.data(), bram, size_bytes);
+
+    munmap(bram, size_bytes);
+
+    std::cout << "✓ ADC BRAM read done\n";
+    return SUCCESS;
+}
+/////////////////////////////////////////////////////////
+
 
 int RfDcApp::read_adc_bram_rftool_style(
     uint32_t tile,
@@ -981,7 +1113,14 @@ void RfDcApp::configure_dac_tiles()
         }
         
         std::cout << format_msg("  Configuring DAC Tile ", tile, "...\n");
-        
+        #if 1
+        constexpr double DAC_SAMPLE_RATE_MHZ = 5898.24;
+        update_pll_sample_rate(
+            rfdc::TileType::DAC,
+            tile,
+            DAC_SAMPLE_RATE_MHZ
+        );
+        #endif
         // Startup the tile
         rfdc_->startup(rfdc::TileType::DAC, tile);
         std::cout << "    • Tile started\n";
@@ -1001,7 +1140,6 @@ void RfDcApp::configure_dac_tiles()
             );
         }
         std::cout << "    • PLL locked\n";
-        
         // Configure each block in the tile
         for (uint32_t block = 0; block < 4; ++block) {
             if (!rfdc_->check_block_enabled(rfdc::TileType::DAC, tile, block)) {
@@ -1009,7 +1147,12 @@ void RfDcApp::configure_dac_tiles()
             }
             
             std::cout << format_msg("      Block ", block, ":\n");
-            
+            rfdc_->set_datapath_mode(
+                tile,                    
+                block,
+                rfdc::DataPathMode::IMRLowPass
+            );   
+        #if 1
             // Configure mixer
             rfdc::MixerSettings mixer(
                 NCO_FREQ,
@@ -1026,11 +1169,10 @@ void RfDcApp::configure_dac_tiles()
             // Set Nyquist zone
             rfdc_->set_nyquist_zone(rfdc::TileType::DAC, tile, block, 
                                    rfdc::NyquistZone::Zone1);
-            
             // Configure interpolation
-            rfdc_->set_interpolation_factor(tile, block, 2);
+            rfdc_->set_interpolation_factor(tile, block, 4);
             std::cout << "        - Interpolation: 4x\n";
-            
+           
             // Disable inverse sinc filter
             rfdc_->set_inverse_sinc_filter(tile, block, 0);
             std::cout << "        - Inverse Sinc: Disabled\n";
@@ -1040,6 +1182,7 @@ void RfDcApp::configure_dac_tiles()
             // Update event
             rfdc_->update_event(rfdc::TileType::DAC, tile, block, 
                               XRFDC_EVENT_MIXER);
+            #endif
         }
         
         // **CRITICAL: Reprogram MMCM after configuration changes**
@@ -1095,10 +1238,12 @@ void RfDcApp::configure_adc_tiles() {
             }
             
             std::cout << format_msg("      Block ", block, ":\n");
-            
+                  // Configure decimation
+            rfdc_->set_decimation_factor(tile, block, 4);
+            std::cout << "        - Decimation: 4x\n";      
             // Configure mixer
             rfdc::MixerSettings mixer(
-                NCO_FREQ,
+                0.0,
                 0.0,
                 rfdc::EventSource::Tile,
                 XRFDC_COARSE_MIX_BYPASS,
@@ -1113,9 +1258,7 @@ void RfDcApp::configure_adc_tiles() {
             rfdc_->set_nyquist_zone(rfdc::TileType::ADC, tile, block,
                                    rfdc::NyquistZone::Zone1);
             
-            // Configure decimation
-            rfdc_->set_decimation_factor(tile, block, 2);
-            std::cout << "        - Decimation: 4x\n";
+
             
             // Configure QMC
             rfdc::QMCSettings qmc(
@@ -1148,7 +1291,8 @@ void RfDcApp::configure_adc_tiles() {
     }
 }
 
-void RfDcApp::verify_configuration() {
+void RfDcApp::verify_configuration() 
+{
     std::cout << "━━━ Verifying Configuration ━━━\n";
     
     // Verify DAC tiles
@@ -1179,7 +1323,8 @@ void RfDcApp::verify_configuration() {
     std::cout << "\n";
     
     // Verify ADC tiles
-    for (uint32_t tile = 0; tile < 4; ++tile) {
+    for (uint32_t tile = 0; tile < 4; ++tile)
+    {
         if (!rfdc_->check_tile_enabled(rfdc::TileType::ADC, tile)) {
             continue;
         }
@@ -1231,8 +1376,12 @@ void RfDcApp::display_status() {
             std::cout << format_msg("      Block ", block, ": ");
             std::cout << std::fixed << std::setprecision(2)
                      << "Fs=" << block_status.sampling_freq() << " MHz, ";
-            std::cout << (block_status.digital_path_clocks_enabled() ? 
-                         "Clocks✓" : "Clocks✗");
+            std::cout
+                << "DDC: "
+                << (block_status.digital_datapath_enabled() ? "ENABLED" : "DISABLED")
+                << " | Clocks: "
+                << (block_status.digital_path_clocks_enabled() ? "ON" : "OFF")
+                << std::endl;
             std::cout << "\n";
         }
     }
@@ -1257,8 +1406,12 @@ void RfDcApp::display_status() {
             std::cout << format_msg("      Block ", block, ": ");
             std::cout << std::fixed << std::setprecision(2)
                      << "Fs=" << block_status.sampling_freq() << " MHz, ";
-            std::cout << (block_status.digital_path_clocks_enabled() ?
-                         "Clocks✓" : "Clocks✗");
+            std::cout
+                << "DDC: "
+                << (block_status.digital_datapath_enabled() ? "ENABLED" : "DISABLED")
+                << " | Clocks: "
+                << (block_status.digital_path_clocks_enabled() ? "ON" : "OFF")
+                << std::endl;
             std::cout << "\n";
         }
     }
@@ -1271,8 +1424,27 @@ void RfDcApp::display_status() {
 void RfDcApp::write_dac_samples(uint32_t tile, uint32_t block,
                                 const std::vector<int16_t>& samples)
 {
+    #if 0
     uint32_t size_bytes = samples.size() * sizeof(int16_t);
     int ret = write_data_to_memory_bram(block, tile, size_bytes, samples);
+    if (ret != SUCCESS) {
+        throw std::runtime_error("Failed to write DAC samples");
+    }
+    #endif
+
+    const uint32_t size_bytes =
+        samples.size() * sizeof(int16_t);
+
+    std::vector<uint8_t> raw(size_bytes);
+    std::memcpy(raw.data(), samples.data(), size_bytes);
+
+    int ret = write_dac_bram_rftool_style(
+        tile,
+        block,
+        size_bytes,
+        raw
+    );
+
     if (ret != SUCCESS) {
         throw std::runtime_error("Failed to write DAC samples");
     }
@@ -1300,6 +1472,7 @@ RfDcApp::AdcSamples RfDcApp::read_adc_samples_i_q(
     size_t num_samples
 )
 {
+#if 0
     AdcSamples captured;
 
     const uint32_t size_bytes =
@@ -1319,10 +1492,58 @@ RfDcApp::AdcSamples RfDcApp::read_adc_samples_i_q(
     captured.is_iq = !captured.Q.empty();
 
     return captured;
+#endif
+    AdcSamples captured;
+    captured.I.clear();
+    captured.Q.clear();
+    captured.is_iq = false;
+
+    // ------------------------------------------------------------
+    // RFDC BRAM stores 2× int16 per 32-bit word
+    // We must read WHOLE WORDS
+    // ------------------------------------------------------------
+    const size_t samples_per_word = 2;
+    const size_t words =
+        (num_samples + samples_per_word - 1) / samples_per_word;
+
+    const uint32_t size_bytes =
+        words * sizeof(uint32_t);   // <-- CRITICAL FIX
+
+    // ------------------------------------------------------------
+    // Raw BRAM read (RFTOOL style)
+    // ------------------------------------------------------------
+    std::vector<uint8_t> raw;
+    int ret = read_adc_bram_rftool_style(
+        tile,
+        block,
+        size_bytes,
+        raw
+    );
+
+    if (ret != SUCCESS) {
+        throw std::runtime_error("Failed to read ADC BRAM");
+    }
+
+    // ------------------------------------------------------------
+    // Decode AFTER read (little-endian int16 stream)
+    // ------------------------------------------------------------
+    const int16_t* s = reinterpret_cast<const int16_t*>(raw.data());
+    const size_t total_samples = raw.size() / sizeof(int16_t);
+
+    captured.I.reserve(num_samples);
+
+    for (size_t i = 0; i < total_samples && captured.I.size() < num_samples; ++i) {
+        captured.I.push_back(s[i]);
+    }
+
+    captured.is_iq = false;   // raw REAL stream
+
+    return captured;
 }
 // ===== Test Functions =====
 
-void RfDcApp::run_loopback_test() {
+void RfDcApp::run_loopback_test() 
+{
     std::cout << "━━━ Running Loopback Test ━━━\n";
     std::cout << "  Testing: DAC Tile 0 Block 0 → ADC Tile 0 Block 0\n";
     std::cout << "  (Loopback cable connected)\n\n";
@@ -1332,7 +1553,7 @@ void RfDcApp::run_loopback_test() {
         const uint32_t block = 0;
         const uint32_t channel_mask = 0x0001;
         const size_t num_samples = 16384;
-        const double test_frequency = 50e6;  // 100 MHz RF output desired
+        const double test_frequency = 100e6;  // 100 MHz RF output desired
         
         // Get DAC configuration
         auto dac_pll = rfdc_->get_pll_config(rfdc::TileType::DAC, tile);
@@ -1409,20 +1630,6 @@ void RfDcApp::run_loopback_test() {
         
         // Calculate actual decimation factor including data path mode
         uint32_t adc_total_decimation = adc_decimation;
-  
-        // Calculate expected frequencies
-        //double dac_baseband_freq_hz = test_frequency ;// dac_interpolation;
-        //double dac_baseband_freq_mhz = dac_baseband_freq_hz / 1e6;
-        //double adc_expected_baseband_hz = test_frequency / adc_total_decimation;
-        //double adc_expected_baseband_mhz = adc_expected_baseband_hz / 1e6;
-        
-        //std::cout << "\nExpected Signal Frequencies:\n";
-        //std::cout << "  DAC Baseband (in BRAM): " << dac_baseband_freq_mhz << " MHz\n";
-        //std::cout << "  DAC RF Output: " << test_frequency / 1e6 << " MHz (× " << dac_interpolation << ")\n";
-        //std::cout << "  ADC RF Input: " << test_frequency / 1e6 << " MHz\n";
-        //std::cout << "  ADC Baseband (in BRAM): " << adc_expected_baseband_mhz << " MHz (÷ " << adc_total_decimation << ")\n";
-        //std::cout << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
-        
         // ===== DAC PLAYBACK SEQUENCE =====
         std::cout << "━━━ DAC Tile 0 Block 0 Setup ━━━\n";
         
@@ -1438,18 +1645,31 @@ void RfDcApp::run_loopback_test() {
         set_local_mem_sample(rfdc::TileType::DAC, tile, block, num_samples);
         
         std::cout << "  Step 3: Generate sine wave\n";
+        bool imr_lowpass_enabled  = false;
+        uint32_t dac_datapath = rfdc_->get_data_path_mode(tile, block);
+
+        if (dac_datapath == static_cast<uint32_t>(rfdc::DataPathMode::IMRLowPass))
+        {
+            imr_lowpass_enabled = true;
+        }
         auto samples = generate_sine_wave(test_frequency, dac_pll_rate_hz, 
-                                         dac_interpolation, num_samples, 30000, -50.0);
-        
+                                         dac_interpolation, num_samples, 30000, -50.0,imr_lowpass_enabled);
+        //unsigned int dac_datapath = rfdc_->get_data_path_mode(tile, block);
+        //auto samples = generate_sine_wave_rf(test_frequency, dac_pll_rate_hz, 
+        //                                 dac_interpolation, num_samples, 30000, -50.0,static_cast<rfdc::DataPathMode>(dac_datapath));
         std::cout << "  Step 4: Write samples to DAC BRAM\n";
         write_dac_samples(tile, block, samples);
         
+        
+        std::cout << "  DAC Datapath mode: " << dac_datapath
+                  << " (1=First Nyquist zone FS 7 GSPS, 2=Second Nyquist zone FS 7 GSPS, 3=First Nyquist zone FS 10 GSPS IMR, 4=Full Bandwidth, Bypass datapath)\n";
         // Create DAC metadata
         std::stringstream dac_meta;
         dac_meta << "# RFDC DAC Configuration\n";
         dac_meta << "# type: DAC\n";
         dac_meta << "# tile: " << tile << "\n";
         dac_meta << "# block: " << block << "\n";
+        dac_meta << "# datapath_mode: " << dac_datapath << "\n";
         dac_meta << "# pll_rate_mhz: " << (dac_pll_rate_hz / 1e6) << "\n";
         dac_meta << "# interpolation: " << dac_interpolation << "\n";
         dac_meta << "# signal_frequency_mhz: " << test_frequency << "\n";  // Baseband in BRAM
@@ -1621,14 +1841,16 @@ std::vector<int16_t> RfDcApp::generate_sine_wave(
     uint32_t dac_interpolation,
     size_t num_samples,
     int16_t amplitude,
-    double noise_dbfs
+    double noise_dbfs,
+    bool imr_lowpass_enabled
 )
 {
     std::vector<int16_t> samples(num_samples);
-
+    const uint32_t eff_interp =
+        dac_interpolation * (imr_lowpass_enabled ? 2 : 1);
     // RF Eval Tool behavior:
     // Samples are generated at the FABRIC rate
-    const double sample_rate_hz = dac_pll_rate_hz / dac_interpolation;
+    const double sample_rate_hz = dac_pll_rate_hz / eff_interp;
 
     const double two_pi = 2.0 * M_PI;
     const double phase_increment = two_pi * frequency_hz / sample_rate_hz;
@@ -1655,7 +1877,59 @@ std::vector<int16_t> RfDcApp::generate_sine_wave(
     }
 
     std::cout << "  ✓ Generated " << num_samples << " DAC samples\n";
-    std::cout << "      Digital Frequency (CF): " << frequency_hz / 1e6 << " MHz\n";
+    std::cout << "      Desired RF Freq:        " << frequency_hz / 1e6 << " MHz\n";
+    std::cout << "      DAC PLL Rate:           " << dac_pll_rate_hz / 1e9 << " GSPS\n";
+    std::cout << "      Fabric Rate:            " << sample_rate_hz / 1e6 << " MSPS\n";
+    std::cout << "      Interp (User):          " << dac_interpolation << "x\n";
+    std::cout << "      Interp (Effective):     " << eff_interp << "x\n";
+    std::cout << "      IMR Low-Pass:           "
+              << (imr_lowpass_enabled ? "ON" : "OFF") << "\n";
+
+    return samples;
+}
+
+std::vector<int16_t> RfDcApp::generate_sine_wave_rf(
+    double frequency_mhz,      // RF-equivalent frequency (what user expects)
+    double dac_pll_rate_hz,
+    uint32_t dac_interpolation,
+    size_t num_samples,
+    int16_t amplitude,
+    double noise_dbfs,
+    rfdc::DataPathMode datapath
+)
+{
+    double rf_freq_mhz = frequency_mhz;
+    std::vector<int16_t> samples(num_samples);
+    // RF Eval Tool behavior:
+    // Samples are generated at the FABRIC rate
+    const double sample_rate_hz = dac_pll_rate_hz / dac_interpolation;
+
+    const double two_pi = 2.0 * M_PI;
+    const double phase_increment = two_pi * rf_freq_mhz / sample_rate_hz;
+
+    // Optional noise
+    const double noise_rms = amplitude * std::pow(10.0, noise_dbfs / 20.0);
+    std::default_random_engine rng;
+    std::normal_distribution<double> gaussian(0.0, 1.0);
+
+    for (size_t i = 0; i < num_samples; ++i) {
+        const double phase = phase_increment * static_cast<double>(i);
+        const double sine  = amplitude * std::sin(phase);
+        const double noise = (noise_dbfs < 0.0) ? noise_rms * gaussian(rng) : 0.0;
+
+        double sample = sine + noise;
+
+        // Clamp (C++14)
+        if (sample > 32767.0)
+            sample = 32767.0;
+        else if (sample < -32768.0)
+            sample = -32768.0;
+
+        samples[i] = static_cast<int16_t>(std::lrint(sample));
+    }
+
+    std::cout << "  ✓ Generated " << num_samples << " DAC samples\n";
+    std::cout << "      Digital Frequency (CF-RF): " << rf_freq_mhz / 1e6 << " MHz\n";
     std::cout << "      DAC PLL Rate:           " << dac_pll_rate_hz / 1e9 << " GSPS\n";
     std::cout << "      Fabric Rate:            " << sample_rate_hz / 1e6 << " MSPS\n";
     std::cout << "      Interpolation:          " << dac_interpolation << "x\n";
@@ -1664,7 +1938,6 @@ std::vector<int16_t> RfDcApp::generate_sine_wave(
 
     return samples;
 }
-
 
 
 std::vector<int16_t> RfDcApp::generate_dc_offset(int16_t value, size_t num_samples)
@@ -1751,4 +2024,44 @@ void RfDcApp::local_mem_trigger(rfdc::TileType type, uint32_t tile_id,
             }
         }
     }
+}
+
+void RfDcApp::update_pll_sample_rate(
+    rfdc::TileType type,
+    uint32_t tile,
+    double desired_sample_rate_mhz
+)
+{
+    // Read current PLL configuration
+    auto pll = rfdc_->get_pll_config(type, tile);
+
+    std::cout << format_msg(
+        "    • Updating PLL Fs ",
+        pll.sample_rate_mhz(),
+        " MHz → ",
+        desired_sample_rate_mhz,
+        " MHz\n"
+    );
+
+    // Reuse existing ref clock & source
+    rfdc_->set_pll_config(
+        type,
+        tile,
+        rfdc::ClockSource::Internal,
+        pll.ref_clk_freq(),                // MHz
+        desired_sample_rate_mhz   // MHz
+    );
+
+    // Optional: wait for lock
+    for (int retry = 0; retry < 100; ++retry) {
+        if (rfdc_->get_pll_lock_status(type, tile)) {
+            std::cout << "    • PLL locked\n";
+            return;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    throw std::runtime_error(
+        format_msg("PLL failed to lock on tile ", tile)
+    );
 }
