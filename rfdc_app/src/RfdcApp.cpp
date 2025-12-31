@@ -219,8 +219,10 @@ void RfDcApp::run()
         verify_configuration();
         display_status();
         // Run tests
-        run_loopback_test();
-        
+        //run_loopback_test();
+        run_iq_loopback_test();
+        //run_codec_diagnostic_test();
+        //run_string_loopback_test();
         std::cout << "\n✓ Application completed successfully!\n";
         
         // Cleanup
@@ -243,6 +245,152 @@ void RfDcApp::run()
         deinit_gpio();
         throw;
     }
+}
+
+void RfDcApp::run_codec_diagnostic_test()
+{
+    std::cout << "━━━ Codec Diagnostic Test ━━━\n";
+    std::cout << "  Testing encode/decode chain WITHOUT RF hardware\n\n";
+    
+    const std::string test_msg = "HELLO";
+    
+    // Show what "HELLO" looks like in hex
+    std::cout << "Reference: \"HELLO\" in hex:\n  ";
+    for (char c : test_msg) {
+        std::cout << std::hex << std::setw(2) << std::setfill('0') 
+                  << static_cast<int>(static_cast<uint8_t>(c)) << " ";
+    }
+    std::cout << std::dec << "\n\n";
+    
+    // Test configuration
+    codec::StringCodec::Config config;
+    config.modulation = codec::StringCodec::ModulationType::BPSK;
+    config.samples_per_symbol = 64;
+    config.amplitude = 3000;
+    config.use_crc = true;
+    config.use_preamble = true;
+    
+    codec::StringCodec codec(config);
+    
+    // ===== TEST 1: Perfect loopback (no noise) =====
+    std::cout << "Test 1: Perfect loopback (no noise)\n";
+    
+    std::vector<int16_t> tx_samples = codec.encode_real(test_msg);
+    std::cout << "  TX: Encoded \"" << test_msg << "\" to " 
+              << tx_samples.size() << " samples\n\n";
+    
+    std::string decoded;
+    bool success = codec.decode_real(tx_samples, decoded);
+    
+    if (success && decoded == test_msg) {
+        std::cout << "  ✓✓✓ PASS: Decoded \"" << decoded << "\"\n\n";
+    } else {
+        std::cout << "  ✗ FAIL: Expected \"" << test_msg 
+                 << "\", got \"" << decoded << "\"\n";
+        std::cout << "  ⚠️ CODEC BUG - software issue, not RF!\n\n";
+        
+        // Show bit-level comparison
+        if (!decoded.empty()) {
+            std::cout << "  Bit comparison:\n";
+            std::cout << "    Expected (hex): ";
+            for (char c : test_msg) {
+                std::cout << std::hex << std::setw(2) << std::setfill('0') 
+                          << static_cast<int>(static_cast<uint8_t>(c)) << " ";
+            }
+            std::cout << "\n    Got (hex):      ";
+            for (char c : decoded) {
+                std::cout << std::hex << std::setw(2) << std::setfill('0') 
+                          << static_cast<int>(static_cast<uint8_t>(c)) << " ";
+            }
+            std::cout << std::dec << "\n\n";
+        }
+        return;
+    }
+    
+    // ===== TEST 2: With added noise =====
+    std::cout << "Test 2: With 1% noise\n";
+    
+    std::vector<int16_t> noisy_samples = tx_samples;
+    std::default_random_engine rng(42);
+    std::normal_distribution<double> noise(0.0, config.amplitude * 0.01);
+    
+    for (auto& s : noisy_samples) {
+        s += static_cast<int16_t>(noise(rng));
+        // Clamp
+        if (s > 32767) s = 32767;
+        if (s < -32768) s = -32768;
+    }
+    
+    success = codec.decode_real(noisy_samples, decoded);
+    
+    if (success && decoded == test_msg) {
+        std::cout << "  ✓✓✓ PASS: Still decoded correctly\n\n";
+    } else {
+        std::cout << "  ✗ FAIL: Noise broke decoder\n";
+        std::cout << "  Expected: \"" << test_msg << "\"\n";
+        std::cout << "  Got:      \"" << decoded << "\"\n\n";
+    }
+    
+    // ===== TEST 3: With amplitude scaling =====
+    std::cout << "Test 3: With 50% amplitude reduction\n";
+    
+    std::vector<int16_t> scaled_samples;
+    for (auto s : tx_samples) {
+        scaled_samples.push_back(s / 2);
+    }
+    
+    success = codec.decode_real(scaled_samples, decoded);
+    
+    if (success && decoded == test_msg) {
+        std::cout << "  ✓✓✓ PASS: Handles amplitude variation\n\n";
+    } else {
+        std::cout << "  ✗ FAIL: Can't handle amplitude changes\n";
+        std::cout << "  This suggests RF path has gain/attenuation issues\n\n";
+    }
+    
+    // ===== TEST 4: With DC offset =====
+    std::cout << "Test 4: With DC offset (+1000)\n";
+    
+    std::vector<int16_t> dc_offset_samples;
+    for (auto s : tx_samples) {
+        dc_offset_samples.push_back(s + 1000);
+    }
+    
+    success = codec.decode_real(dc_offset_samples, decoded);
+    
+    if (success && decoded == test_msg) {
+        std::cout << "  ✓✓✓ PASS: Handles DC offset\n\n";
+    } else {
+        std::cout << "  ⚠ FAIL: DC offset breaks decoder\n";
+        std::cout << "  Check ADC DC offset in RF path\n\n";
+    }
+    
+    // ===== TEST 5: Timing offset =====
+    std::cout << "Test 5: With timing offset (5 samples delay)\n";
+    
+    std::vector<int16_t> delayed_samples(5, 0);
+    delayed_samples.insert(delayed_samples.end(), 
+                          tx_samples.begin(), 
+                          tx_samples.end());
+    
+    success = codec.decode_real(delayed_samples, decoded);
+    
+    if (success && decoded == test_msg) {
+        std::cout << "  ✓✓✓ PASS: Handles timing offset\n\n";
+    } else {
+        std::cout << "  ✗ FAIL: Timing offset breaks decoder\n";
+        std::cout << "  Preamble detection may need tuning\n\n";
+    }
+    
+    // ===== SUMMARY =====
+    std::cout << "━━━ Diagnostic Summary ━━━\n";
+    std::cout << "If ALL tests pass:\n";
+    std::cout << "  → Codec is working correctly\n";
+    std::cout << "  → Problem is in RF path (cables, gains, timing)\n\n";
+    
+    std::cout << "If tests FAIL:\n";
+    std::cout << "  → Fix codec implementation first\n";
+    std::cout << "  → Don't proceed to RF testing until software works\n\n";
 }
 
 // ===== Helper Functions =====
@@ -663,8 +811,8 @@ int RfDcApp::read_adc_bram_rftool_style(
 
     const auto& adc_map = rfdc_->get_adc_map();
     uint32_t idx = tile * 4 + block;
+    
     uint32_t paddr = adc_map[idx].addr_I;
-
     if (paddr == 0xFFFFFFFF) {
         std::cerr << "✗ Invalid ADC BRAM address\n";
         return FAIL;
@@ -1103,6 +1251,236 @@ void RfDcApp::initialize_mmcm_dac() {
 
 void RfDcApp::configure_dac_tiles() 
 {
+    std::cout << "━━━ Configuring DAC Tiles (I/Q Mode) ━━━\n";
+    
+    constexpr double NCO_FREQ = 0.0;  // MHz
+    
+    for (uint32_t tile = 0; tile < 4; ++tile) {
+        if (!rfdc_->check_tile_enabled(rfdc::TileType::DAC, tile)) {
+            continue;
+        }
+        
+        std::cout << format_msg("  Configuring DAC Tile ", tile, "...\n");
+        #if 1
+        constexpr double DAC_SAMPLE_RATE_MHZ = 5898.24;
+        update_pll_sample_rate(
+            rfdc::TileType::DAC,
+            tile,
+            DAC_SAMPLE_RATE_MHZ
+        );
+        #endif
+        // Startup the tile
+        rfdc_->startup(rfdc::TileType::DAC, tile);
+        std::cout << "    • Tile started\n";
+        
+        // Wait for PLL lock
+        bool locked = false;
+        for (int retry = 0; retry < 100 && !locked; ++retry) {
+            locked = rfdc_->get_pll_lock_status(rfdc::TileType::DAC, tile);
+            if (!locked) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        }
+        
+        if (!locked) {
+            throw rfdc::RFDCException(
+                format_msg("DAC Tile ", tile, " PLL failed to lock")
+            );
+        }
+        std::cout << "    • PLL locked\n";
+        
+        // Configure each block in the tile (I/Q pairs)
+        for (uint32_t block = 0; block < 4; block += 2) {  // Process I/Q pairs
+            if (!rfdc_->check_block_enabled(rfdc::TileType::DAC, tile, block)) {
+                continue;
+            }
+            
+            std::cout << format_msg("      Block ", block, " (I) & ", block+1, " (Q):\n");
+            
+            // Configure I channel
+            rfdc_->set_datapath_mode(
+                tile,                    
+                block,
+                rfdc::DataPathMode::FullNyquistDucPass
+            );   
+            
+            // Configure Q channel
+            rfdc_->set_datapath_mode(
+                tile,                    
+                block + 1,
+                rfdc::DataPathMode::FullNyquistDucPass
+            );
+            
+        #if 1
+            // Configure mixer for I channel (Real-to-Complex)
+            rfdc::MixerSettings mixer_i(
+                NCO_FREQ,
+                0.0,
+                rfdc::EventSource::Tile,
+                XRFDC_COARSE_MIX_BYPASS,
+                rfdc::MixerMode::C2C,  // Real-to-Complex for I/Q
+                0.0,
+                rfdc::MixerType::Fine
+            );
+            rfdc_->set_mixer_settings(rfdc::TileType::DAC, tile, block, mixer_i);
+            
+            // Configure mixer for Q channel (Real-to-Complex)
+            rfdc::MixerSettings mixer_q(
+                NCO_FREQ,
+                0.0,
+                rfdc::EventSource::Tile,
+                XRFDC_COARSE_MIX_BYPASS,
+                rfdc::MixerMode::C2C,  // Real-to-Complex for I/Q
+                0.0,
+                rfdc::MixerType::Fine
+            );
+            rfdc_->set_mixer_settings(rfdc::TileType::DAC, tile, block + 1, mixer_q);
+            
+            std::cout << format_msg("        - Mixer (I/Q): ", NCO_FREQ, " MHz, R2C mode\n");
+            
+            // Set Nyquist zone for both I and Q
+            rfdc_->set_nyquist_zone(rfdc::TileType::DAC, tile, block, 
+                                   rfdc::NyquistZone::Zone1);
+            rfdc_->set_nyquist_zone(rfdc::TileType::DAC, tile, block + 1, 
+                                   rfdc::NyquistZone::Zone1);
+            
+            // Configure interpolation for both channels
+            rfdc_->set_interpolation_factor(tile, block, 2);
+            rfdc_->set_interpolation_factor(tile, block + 1, 2);
+            std::cout << "        - Interpolation: 2x (I/Q)\n";
+           
+            // Disable inverse sinc filter for both channels
+            rfdc_->set_inverse_sinc_filter(tile, block, 0);
+            rfdc_->set_inverse_sinc_filter(tile, block + 1, 0);
+            std::cout << "        - Inverse Sinc: Disabled (I/Q)\n";
+            
+            // Reset NCO phase for both channels
+            rfdc_->reset_nco_phase(rfdc::TileType::DAC, tile, block);
+            rfdc_->reset_nco_phase(rfdc::TileType::DAC, tile, block + 1);
+            std::cout << "        - NCO Phase: reset (I/Q)\n";
+            
+            // Update event for both channels
+            rfdc_->update_event(rfdc::TileType::DAC, tile, block, 
+                              XRFDC_EVENT_MIXER);
+            rfdc_->update_event(rfdc::TileType::DAC, tile, block + 1, 
+                              XRFDC_EVENT_MIXER);
+            #endif
+        }
+        
+        // **CRITICAL: Reprogram MMCM after configuration changes**
+        std::cout << "    • Reprogramming MMCM...\n";
+        if (!clock_wiz_->program_mmcm(rfdc::TileType::DAC, tile)) {
+            std::cerr << "    ✗ MMCM programming failed\n";
+        }
+        
+        // Enable FIFO
+        rfdc_->setup_fifo(rfdc::TileType::DAC, tile, true);
+        std::cout << "    • FIFO enabled\n";
+        
+        std::cout << format_msg("  ✓ DAC Tile ", tile, " configured (I/Q)\n\n");
+    }
+}
+
+
+void RfDcApp::configure_adc_tiles() {
+    std::cout << "━━━ Configuring ADC Tiles (I/Q Mode - RF Eval Tool Style) ━━━\n";
+    
+    constexpr double NCO_FREQ = 0.0;  // MHz
+    
+    for (uint32_t tile = 0; tile < 4; ++tile) {
+        if (!rfdc_->check_tile_enabled(rfdc::TileType::ADC, tile)) {
+            continue;
+        }
+        
+        std::cout << format_msg("  Configuring ADC Tile ", tile, "...\n");
+        
+        // Startup the tile
+        rfdc_->startup(rfdc::TileType::ADC, tile);
+        std::cout << "    • Tile started\n";
+        
+        // Wait for PLL lock
+        bool locked = false;
+        for (int retry = 0; retry < 100 && !locked; ++retry) {
+            locked = rfdc_->get_pll_lock_status(rfdc::TileType::ADC, tile);
+            if (!locked) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        }
+        
+        if (!locked) {
+            throw rfdc::RFDCException(
+                format_msg("ADC Tile ", tile, " PLL failed to lock")
+            );
+        }
+        std::cout << "    • PLL locked\n";
+        
+        // Configure each block individually (RF Eval Tool style)
+        // Each block is "Real" but outputs I/Q via Fine mixer
+        for (uint32_t block = 0; block < 4; ++block) {
+            if (!rfdc_->check_block_enabled(rfdc::TileType::ADC, tile, block)) {
+                continue;
+            }
+            
+            std::cout << format_msg("      Block ", block, ":\n");
+            
+            // Configure decimation
+            rfdc_->set_decimation_factor(tile, block, 1);  // RF Eval shows 1x
+            std::cout << "        - Decimation: 1x\n";      
+            
+            // CRITICAL: Use Fine mixer with R2C (Real to I/Q) mode
+            // This matches RF Eval Tool's "Real to I/Q" setting
+            rfdc::MixerSettings mixer(
+                NCO_FREQ,                  // 0.0 MHz frequency
+                0.0,                       // Phase
+                rfdc::EventSource::Tile,
+                XRFDC_COARSE_MIX_BYPASS,   // Bypass coarse mixer
+                rfdc::MixerMode::R2C,      // Real-to-Complex (Real to I/Q)
+                0,
+                rfdc::MixerType::Fine      // Fine mixer (as shown in GUI)
+            );
+            rfdc_->set_mixer_settings(rfdc::TileType::ADC, tile, block, mixer);
+            
+            std::cout << format_msg("        - Mixer: Fine, Real to I/Q, ", NCO_FREQ, " MHz\n");
+            
+            // Set Nyquist zone
+            rfdc_->set_nyquist_zone(rfdc::TileType::ADC, tile, block,
+                                   rfdc::NyquistZone::Zone1);
+            
+            // Configure QMC (disabled in RF Eval Tool)
+            rfdc::QMCSettings qmc(
+                false, false, 0.0, 0.0, 0,
+                rfdc::EventSource::Tile
+            );
+            
+            rfdc_->set_qmc_settings(rfdc::TileType::ADC, tile, block, qmc);
+            std::cout << "        - QMC: Disabled\n";
+            
+            // Set calibration mode (AutoCal in RF Eval Tool)
+            rfdc_->set_calibration_mode(tile, block, rfdc::CalibrationMode::Mode1);
+            std::cout << "        - Calibration: Mode 1 (AutoCal)\n";
+            
+            // Update event
+            rfdc_->update_event(rfdc::TileType::ADC, tile, block,
+                              XRFDC_EVENT_MIXER);
+        }
+        
+        // **CRITICAL: Reprogram MMCM after configuration changes**
+        std::cout << "    • Reprogramming MMCM...\n";
+        if (!clock_wiz_->program_mmcm(rfdc::TileType::ADC, tile)) {
+            std::cerr << "    ✗ MMCM programming failed\n";
+        }
+        
+        // Enable FIFO
+        rfdc_->setup_fifo(rfdc::TileType::ADC, tile, true);
+        std::cout << "    • FIFO enabled\n";
+        
+        std::cout << format_msg("  ✓ ADC Tile ", tile, " configured (Real to I/Q mode)\n\n");
+    }
+}
+
+#if 0 //this is real mode 
+void RfDcApp::configure_dac_tiles() 
+{
     std::cout << "━━━ Configuring DAC Tiles ━━━\n";
     
     constexpr double NCO_FREQ = 0.0;  // MHz
@@ -1150,7 +1528,7 @@ void RfDcApp::configure_dac_tiles()
             rfdc_->set_datapath_mode(
                 tile,                    
                 block,
-                rfdc::DataPathMode::IMRLowPass
+                rfdc::DataPathMode::FullNyquistDucPass
             );   
         #if 1
             // Configure mixer
@@ -1170,8 +1548,8 @@ void RfDcApp::configure_dac_tiles()
             rfdc_->set_nyquist_zone(rfdc::TileType::DAC, tile, block, 
                                    rfdc::NyquistZone::Zone1);
             // Configure interpolation
-            rfdc_->set_interpolation_factor(tile, block, 4);
-            std::cout << "        - Interpolation: 4x\n";
+            rfdc_->set_interpolation_factor(tile, block, 2);
+            std::cout << "        - Interpolation: 2x\n";
            
             // Disable inverse sinc filter
             rfdc_->set_inverse_sinc_filter(tile, block, 0);
@@ -1239,8 +1617,8 @@ void RfDcApp::configure_adc_tiles() {
             
             std::cout << format_msg("      Block ", block, ":\n");
                   // Configure decimation
-            rfdc_->set_decimation_factor(tile, block, 4);
-            std::cout << "        - Decimation: 4x\n";      
+            rfdc_->set_decimation_factor(tile, block, 2);
+            std::cout << "        - Decimation: 2x\n";      
             // Configure mixer
             rfdc::MixerSettings mixer(
                 0.0,
@@ -1265,6 +1643,16 @@ void RfDcApp::configure_adc_tiles() {
                 false, false, 0.0, 0.0, 0,
                 rfdc::EventSource::Tile
             );
+
+            //rfdc::QMCSettings qmc(
+            //    true,   // EnableGain
+            //    false,  // EnablePhase
+            //    4.0,    // GainCorrectionFactor (start here)
+            //    0.0,    // PhaseCorrectionFactor
+            //    0,      // OffsetCorrectionFactor
+            //    rfdc::EventSource::Tile
+            //);    
+
             rfdc_->set_qmc_settings(rfdc::TileType::ADC, tile, block, qmc);
             std::cout << "        - QMC: Disable\n";
             
@@ -1291,6 +1679,7 @@ void RfDcApp::configure_adc_tiles() {
     }
 }
 
+#endif
 void RfDcApp::verify_configuration() 
 {
     std::cout << "━━━ Verifying Configuration ━━━\n";
@@ -1466,6 +1855,7 @@ std::vector<int16_t> RfDcApp::read_adc_samples_pure_real(uint32_t tile, uint32_t
 }
 
 
+#if 0
 RfDcApp::AdcSamples RfDcApp::read_adc_samples_i_q(
     uint32_t tile,
     uint32_t block,
@@ -1541,6 +1931,7 @@ RfDcApp::AdcSamples RfDcApp::read_adc_samples_i_q(
     return captured;
 }
 // ===== Test Functions =====
+#endif
 
 void RfDcApp::run_loopback_test() 
 {
@@ -1553,7 +1944,7 @@ void RfDcApp::run_loopback_test()
         const uint32_t block = 0;
         const uint32_t channel_mask = 0x0001;
         const size_t num_samples = 16384;
-        const double test_frequency = 100e6;  // 100 MHz RF output desired
+        const double test_frequency = 50e6;  // 100 MHz RF output desired
         
         // Get DAC configuration
         auto dac_pll = rfdc_->get_pll_config(rfdc::TileType::DAC, tile);
@@ -2065,3 +2456,1035 @@ void RfDcApp::update_pll_sample_rate(
         format_msg("PLL failed to lock on tile ", tile)
     );
 }
+
+
+// ===== CRITICAL FIX: Reduce amplitude to avoid clipping =====
+RfDcApp::AdcSamples RfDcApp::read_adc_samples_i_q(
+    uint32_t tile,
+    uint32_t block,
+    size_t num_samples
+)
+{
+    AdcSamples captured;
+    captured.I.clear();
+    captured.Q.clear();
+    captured.is_iq = false;
+
+    // ------------------------------------------------------------
+    // 1) Check mixer settings to determine if we're in I/Q mode
+    // ------------------------------------------------------------
+    auto mixer = rfdc_->get_mixer_settings(rfdc::TileType::ADC, tile, block);
+    bool is_high_speed = rfdc_->check_high_speed_adc(tile);
+
+    // Determine if this is REAL or IQ mode based on mixer
+    bool is_real = 
+        (mixer.mode() == rfdc::MixerMode::R2R) ||
+        (mixer.type() == rfdc::MixerType::Coarse &&
+         mixer.frequency() == XRFDC_COARSE_MIX_BYPASS);
+
+    bool is_iq_mode = !is_real;
+
+    std::cout << "--------------------------------------------------\n";
+    std::cout << "ADC Read (Tile " << tile << ", Block " << block << ")\n";
+    std::cout << "  Mixer Mode     : " << rfdc_->to_string(mixer.mode()) << "\n";
+    std::cout << "  Mixer Type     : " << rfdc_->to_string(mixer.type()) << "\n";
+    std::cout << "  High-speed ADC : " << (is_high_speed ? "YES" : "NO") << "\n";
+    std::cout << "  Detected Mode  : " << (is_iq_mode ? "I/Q" : "REAL") << "\n";
+    std::cout << "--------------------------------------------------\n";
+
+    // ------------------------------------------------------------
+    // 2) Calculate read size (must be word-aligned)
+    //    RFDC BRAM stores 2× int16 per 32-bit word
+    // ------------------------------------------------------------
+    const size_t samples_per_word = 2;
+    const size_t words = (num_samples + samples_per_word - 1) / samples_per_word;
+    const uint32_t size_bytes = words * sizeof(uint32_t);
+
+    // ------------------------------------------------------------
+    // 3) REAL mode - read from single block (I channel only)
+    // ------------------------------------------------------------
+    if (!is_iq_mode) {
+        std::cout << "  Reading REAL mode from block " << block << "\n";
+        
+        std::vector<uint8_t> raw;
+        int ret = read_adc_bram_rftool_style(tile, block,size_bytes, raw);
+        
+        if (ret != SUCCESS) {
+            throw std::runtime_error("Failed to read ADC BRAM (REAL mode)");
+        }
+
+        // Decode int16 stream
+        const int16_t* s = reinterpret_cast<const int16_t*>(raw.data());
+        const size_t total_samples = raw.size() / sizeof(int16_t);
+
+        captured.I.reserve(num_samples);
+        for (size_t i = 0; i < total_samples && captured.I.size() < num_samples; ++i) {
+            captured.I.push_back(s[i]);
+        }
+
+        captured.is_iq = false;
+        std::cout << "  ✓ Read " << captured.I.size() << " REAL samples\n";
+        return captured;
+    }
+
+    // ------------------------------------------------------------
+    // 4) I/Q mode - read from BOTH addr_I and addr_Q of the SAME block
+    // ------------------------------------------------------------
+    std::cout << "  Reading I/Q mode from block " << block << " (I and Q addresses)\n";
+
+    const auto& adc_map = rfdc_->get_adc_map();
+    uint32_t idx = tile * 4 + block;
+    
+    uint32_t addr_i = adc_map[idx].addr_I;
+    uint32_t addr_q = adc_map[idx].addr_Q;
+    
+    if (addr_i == 0xFFFFFFFF || addr_q == 0xFFFFFFFF) {
+        throw std::runtime_error("Invalid ADC I/Q BRAM addresses");
+    }
+
+    // Read I channel from addr_I
+    std::cout << "    Reading I channel (addr=0x" << std::hex << addr_i << std::dec << ")...\n";
+    std::vector<uint8_t> raw_i;
+    
+    void* bram_i = mmap(nullptr, size_bytes, PROT_READ | PROT_WRITE,
+                        MAP_SHARED, info_.fd, addr_i);
+    if (bram_i == MAP_FAILED) {
+        perror("mmap ADC I");
+        throw std::runtime_error("Failed to mmap ADC I channel");
+    }
+    
+    raw_i.resize(size_bytes);
+    std::memcpy(raw_i.data(), bram_i, size_bytes);
+    munmap(bram_i, size_bytes);
+    std::cout << "    ✓ Read I channel (" << size_bytes << " bytes)\n";
+
+    // Read Q channel from addr_Q
+    std::cout << "    Reading Q channel (addr=0x" << std::hex << addr_q << std::dec << ")...\n";
+    std::vector<uint8_t> raw_q;
+    
+    void* bram_q = mmap(nullptr, size_bytes, PROT_READ | PROT_WRITE,
+                        MAP_SHARED, info_.fd, addr_q);
+    if (bram_q == MAP_FAILED) {
+        perror("mmap ADC Q");
+        throw std::runtime_error("Failed to mmap ADC Q channel");
+    }
+    
+    raw_q.resize(size_bytes);
+    std::memcpy(raw_q.data(), bram_q, size_bytes);
+    munmap(bram_q, size_bytes);
+    std::cout << "    ✓ Read Q channel (" << size_bytes << " bytes)\n";
+
+    // ------------------------------------------------------------
+    // 5) Decode I samples (2 int16 per 32-bit word)
+    // ------------------------------------------------------------
+    const int16_t* i_ptr = reinterpret_cast<const int16_t*>(raw_i.data());
+    const size_t total_i_samples = raw_i.size() / sizeof(int16_t);
+    
+    captured.I.reserve(num_samples);
+    for (size_t i = 0; i < total_i_samples && captured.I.size() < num_samples; ++i) {
+        captured.I.push_back(i_ptr[i]);
+    }
+
+    // ------------------------------------------------------------
+    // 6) Decode Q samples (2 int16 per 32-bit word)
+    // ------------------------------------------------------------
+    const int16_t* q_ptr = reinterpret_cast<const int16_t*>(raw_q.data());
+    const size_t total_q_samples = raw_q.size() / sizeof(int16_t);
+    
+    captured.Q.reserve(num_samples);
+    for (size_t i = 0; i < total_q_samples && captured.Q.size() < num_samples; ++i) {
+        captured.Q.push_back(q_ptr[i]);
+    }
+
+    captured.is_iq = true;
+    
+    std::cout << "  ✓ Read " << captured.I.size() << " I samples and " 
+              << captured.Q.size() << " Q samples\n";
+
+    return captured;
+}
+
+
+
+void RfDcApp::run_string_loopback_test() 
+{
+    std::cout << "━━━ Running String Loopback Test ━━━\n";
+    std::cout << "  Testing: DAC Tile 0 Block 0 → ADC Tile 0 Block 0\n";
+    std::cout << "  Message transmission over RF loopback\n\n";
+    
+    try {
+        const uint32_t tile = 0;
+        const uint32_t block = 0;
+        const uint32_t channel_mask = 0x0001;
+        
+        // Test message
+        const std::string test_message = "HELLO";
+        
+        // ===== Setup Codec with REDUCED amplitude =====
+        codec::StringCodec::Config codec_config;
+        codec_config.modulation = codec::StringCodec::ModulationType::BPSK;
+        codec_config.samples_per_symbol = 64;
+        codec_config.amplitude = 6000;  // ⚠️ REDUCED from 30000 to avoid clipping!
+        codec_config.use_crc = true;
+        codec_config.use_preamble = false;
+        
+        codec::StringCodec codec(codec_config);
+        
+        std::cout << "Codec Configuration:\n";
+        std::cout << "  Modulation: BPSK (1 bit/symbol)\n";
+        std::cout << "  Samples/Symbol: " << codec_config.samples_per_symbol << "\n";
+        std::cout << "  Amplitude: " << codec_config.amplitude << " ⚠️ REDUCED to avoid clipping\n";
+        std::cout << "  CRC: Enabled\n";
+        std::cout << "  Preamble: Enabled\n\n";
+        
+        // ===== DAC TRANSMISSION =====
+        std::cout << "━━━ DAC Tile 0 Block 0 Setup ━━━\n";
+        
+        if (!rfdc_->get_pll_lock_status(rfdc::TileType::DAC, tile)) {
+            throw std::runtime_error("DAC Tile 0 PLL not locked!");
+        }
+        
+        // Encode message
+        std::vector<int16_t> tx_samples = codec.encode_real(test_message);
+
+        std::cout << "\n━━━ TX Signal Analysis ━━━\n";
+        std::cout << "  Total samples: " << tx_samples.size() << "\n";
+
+        // Show preamble region
+        std::cout << "  Preamble (samples 0-511):\n  ";
+        for (size_t i = 0; i < 512; i += 64) {
+            int32_t sum = 0;
+            for (size_t j = 0; j < 64; ++j) {
+                sum += tx_samples[i + j];
+            }
+            int16_t avg = sum / 64;
+            std::cout << "Symbol " << (i/64) << ": " << avg << " ";
+        }
+        std::cout << "\n";
+
+        // Show data region  
+        std::cout << "  Data (samples 512-1023):\n  ";
+        for (size_t i = 512; i < 1024; i += 64) {
+            int32_t sum = 0;
+            for (size_t j = 0; j < 64; ++j) {
+                sum += tx_samples[i + j];
+            }
+            int16_t avg = sum / 64;
+            std::cout << "Symbol " << ((i-512)/64) << ": " << avg << " ";
+        }
+        std::cout << "\n";
+        size_t num_samples = tx_samples.size();
+        
+        std::cout << "  Message: \"" << test_message << "\"\n";
+        std::cout << "  Encoded to " << num_samples << " samples\n\n";
+        
+        std::cout << "TX length: " << tx_samples.size() << " samples\n";
+        std::cout << "Expected: " << (8 + (5+2)*8) * 64 << " samples\n";
+
+        // Reset and configure
+        local_mem_trigger(rfdc::TileType::DAC, tile, num_samples, 0x0000);
+        set_local_mem_sample(rfdc::TileType::DAC, tile, block, num_samples);
+        write_dac_samples(tile, block, tx_samples);
+        
+        std::cout << "  ✓ Triggering DAC playback...\n";
+        local_mem_trigger(rfdc::TileType::DAC, tile, num_samples, channel_mask);
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        
+        // ===== ADC CAPTURE =====
+        std::cout << "\n━━━ ADC Tile 0 Block 0 Capture ━━━\n";
+        
+        if (!rfdc_->get_pll_lock_status(rfdc::TileType::ADC, tile)) {
+            throw std::runtime_error("ADC Tile 0 PLL not locked!");
+        }
+        
+        set_local_mem_sample(rfdc::TileType::ADC, tile, block, num_samples);
+        local_mem_trigger(rfdc::TileType::ADC, tile, num_samples, channel_mask);
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        
+        auto captured = read_adc_samples_i_q(tile, block, num_samples);
+        std::cout << "  ✓ Captured " << captured.I.size() << " samples\n";
+
+        // ===== ADD THIS: SCAN FOR DATA START =====
+        std::cout << "\n━━━ Scanning for Data Start ━━━\n";
+        std::cout << "  Symbol averages (looking for stable data region):\n";
+
+        size_t best_data_start = 512;  // Default fallback
+        double best_stability = 0;
+
+        for (size_t i = 400; i < 800; i += 16) {  // Scan every 16 samples
+            if (i + 192 >= captured.I.size()) break;  // Need 3 symbols ahead
+            
+            // Calculate average and variance for 3 consecutive symbols
+            double stability_score = 0;
+            bool all_strong = true;
+            
+            for (int sym = 0; sym < 3; ++sym) {
+                int32_t sum = 0;
+                for (size_t j = 0; j < 64; ++j) {
+                    sum += captured.I[i + sym * 64 + j];
+                }
+                int16_t avg = sum / 64;
+                
+                // Calculate variance
+                double variance = 0;
+                for (size_t j = 0; j < 64; ++j) {
+                    int16_t val = captured.I[i + sym * 64 + j];
+                    double diff = val - avg;
+                    variance += diff * diff;
+                }
+                variance /= 64;
+                
+                // Good data: high magnitude, low variance
+                if (std::abs(avg) < 4000) all_strong = false;
+                stability_score += std::abs(avg) / (variance + 1000.0);
+            }
+            
+            if (all_strong && stability_score > best_stability) {
+                best_stability = stability_score;
+                best_data_start = i;
+            }
+            
+            // Print every 64 samples for debugging
+            if (i % 64 == 0) {
+                int32_t sum = 0;
+                for (size_t j = 0; j < 64 && (i+j) < captured.I.size(); ++j) {
+                    sum += captured.I[i + j];
+                }
+                int16_t avg = sum / 64;
+                
+                std::cout << "    Sample " << std::setw(4) << i 
+                        << ": avg=" << std::setw(6) << avg;
+                
+                if (std::abs(avg) > 5000) {
+                    std::cout << " ✓ STRONG";
+                }
+                if (i == best_data_start) {
+                    std::cout << " ← BEST";
+                }
+                std::cout << "\n";
+            }
+        }
+
+        std::cout << "\n  → Data start detected at sample: " << best_data_start << "\n";
+        std::cout << "    (Expected: 512, Actual offset: " 
+                << (int)best_data_start - 512 << " samples)\n";
+
+        // Show samples at detected data start
+        std::cout << "  First 32 samples at detected start:\n  ";
+        for (size_t i = best_data_start; i < best_data_start + 32 && i < captured.I.size(); ++i) {
+            std::cout << captured.I[i];
+            if ((i - best_data_start + 1) % 16 == 0) std::cout << "\n  ";
+            else std::cout << " ";
+        }
+        std::cout << "\n";
+
+        // ===== NOW USE THIS IN ATTEMPT 2 =====
+
+        std::cout << "\n━━━ RX Signal Analysis ━━━\n";
+
+        // 1. Check signal strength
+        auto minmax = std::minmax_element(captured.I.begin(), captured.I.end());
+        std::cout << "  RX Range: [" << *minmax.first << ", " << *minmax.second << "]\n";
+        std::cout << "  RX P-P: " << (*minmax.second - *minmax.first) << "\n";
+
+        // ===== SIGNAL ANALYSIS =====
+        codec.analyze_signal(captured.I, captured.Q);
+        
+        // Check for clipping
+        int clipped = std::count_if(captured.I.begin(), captured.I.end(),
+                                    [](int16_t s) { return std::abs(s) >= 32760; });
+        if (clipped > captured.I.size() * 0.01) {  // More than 1%
+            std::cout << "\n  ⚠️⚠️⚠️ SEVERE CLIPPING DETECTED ⚠️⚠️⚠️\n";
+            std::cout << "  " << clipped << "/" << captured.I.size() 
+                     << " samples are clipped (" 
+                     << (100.0 * clipped / captured.I.size()) << "%)\n";
+            std::cout << "  REDUCE AMPLITUDE FURTHER or adjust DAC/ADC gains!\n\n";
+        }
+        
+        codec.save_constellation(captured.I, captured.Q, "constellation.csv");
+        
+        // ===== TRY DECODE WITH RELAXED PREAMBLE =====
+        std::cout << "\n━━━ Message Decoding (Attempt 1: With Preamble) ━━━\n";
+        
+        std::string decoded_message;
+        bool decode_success = codec.decode_real(captured.I, decoded_message);
+        
+        // If preamble detection fails, try without it
+        if (!decode_success) {
+            std::cout << "\n━━━ Attempt 2: Manual Preamble Skip (Adaptive) ━━━\n";
+
+            // Use detected data start instead of fixed offset
+            const size_t preamble_samples = best_data_start;  // ← CHANGED
+
+            if (captured.I.size() <= preamble_samples) {
+                std::cerr << "  ✗ Signal too short\n";
+                return;
+            }
+
+            std::vector<int16_t> data_only(
+                captured.I.begin() + preamble_samples,
+                captured.I.end()
+            );
+
+            std::cout << "  Using detected data start: " << preamble_samples << " samples\n";
+            std::cout << "  Decoding data: " << data_only.size() << " samples\n";
+
+            // Show first data samples
+            std::cout << "  First 64 data samples:\n  ";
+            for (size_t i = 0; i < 64 && i < data_only.size(); ++i) {
+                std::cout << data_only[i];
+                if ((i+1) % 16 == 0 && i < 63) std::cout << "\n  ";
+                else if (i < 63) std::cout << " ";
+            }
+            std::cout << "\n\n";
+
+            // Decode WITHOUT preamble
+            codec::StringCodec::Config cfg_no_preamble = codec_config;
+            cfg_no_preamble.use_preamble = false;
+            codec::StringCodec decoder(cfg_no_preamble);
+
+            std::string decoded;
+            bool success = decoder.decode_real(data_only, decoded);
+
+            if (success && decoded == test_message) {
+                std::cout << "\n━━━ Result ━━━\n";
+                std::cout << "  ✓✓✓ SUCCESS! ✓✓✓\n";
+                std::cout << "  TX: \"" << test_message << "\"\n";
+                std::cout << "  RX: \"" << decoded << "\"\n";
+                return;
+            }
+        }
+        
+        // ===== RESULT =====
+        std::cout << "\n━━━ Result ━━━\n";
+        if (decode_success && !decoded_message.empty()) {
+            std::cout << "  ✓✓✓ DECODE SUCCESS! ✓✓✓\n";
+            std::cout << "  Transmitted: \"" << test_message << "\"\n";
+            std::cout << "  Received:    \"" << decoded_message << "\"\n";
+            
+            if (decoded_message == test_message) {
+                std::cout << "\n  🎉 PERFECT MATCH!\n";
+            } else {
+                std::cout << "\n  ⚠ Partial match - some errors\n";
+                std::cout << "  TX length: " << test_message.length() 
+                         << ", RX length: " << decoded_message.length() << "\n";
+            }
+        } else {
+            std::cout << "  ✗ DECODE FAILED\n";
+            
+            if (!decoded_message.empty()) {
+                std::cout << "  Partial: \"" << decoded_message << "\"\n";
+            }
+            
+            std::cout << "\n  Next Steps:\n";
+            std::cout << "  1. ⚠️ CRITICAL: Reduce amplitude further (currently " 
+                     << codec_config.amplitude << ")\n";
+            std::cout << "  2. Check constellation.csv - symbols should cluster at ±amplitude\n";
+            std::cout << "  3. Verify loopback cable is connected\n";
+            std::cout << "  4. Try without CRC: config.use_crc = false\n";
+        }
+        
+        // Save for analysis
+        auto dac_pll = rfdc_->get_pll_config(rfdc::TileType::DAC, tile);
+        auto adc_pll = rfdc_->get_pll_config(rfdc::TileType::ADC, tile);
+        
+        save_samples_to_csv(tx_samples, dac_pll.sample_rate() * 1e9, 
+                           "string_tx.csv", "# TX\n");
+        save_samples_to_csv(captured.I, adc_pll.sample_rate() * 1e9,
+                           "string_rx.csv", "# RX\n");
+        
+        std::cout << "\n  Files: string_tx.csv, string_rx.csv, constellation.csv\n";
+        
+    } catch (const std::exception& e) {
+        std::cerr << "\n✗ Error: " << e.what() << "\n";
+    }
+}
+
+// ===== ALTERNATIVE: Try even simpler test without codec complexity =====
+
+void RfDcApp::run_simple_pattern_test()
+{
+    std::cout << "━━━ Simple Pattern Test (No Encoding) ━━━\n";
+    
+    const uint32_t tile = 0;
+    const uint32_t block = 0;
+    const uint32_t channel_mask = 0x0001;
+    
+    // Create simple alternating pattern: +8000, -8000, +8000, -8000...
+    const size_t num_samples = 1024;
+    std::vector<int16_t> pattern;
+    
+    for (size_t i = 0; i < num_samples; ++i) {
+        // Alternate every 16 samples (slower transitions)
+        pattern.push_back(((i / 16) % 2) ? 8000 : -8000);
+    }
+    
+    std::cout << "  Transmitting square wave pattern...\n";
+    std::cout << "  Amplitude: ±8000\n";
+    std::cout << "  Samples: " << num_samples << "\n\n";
+    
+    // DAC
+    local_mem_trigger(rfdc::TileType::DAC, tile, num_samples, 0x0000);
+    set_local_mem_sample(rfdc::TileType::DAC, tile, block, num_samples);
+    write_dac_samples(tile, block, pattern);
+    local_mem_trigger(rfdc::TileType::DAC, tile, num_samples, channel_mask);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    
+    // ADC
+    set_local_mem_sample(rfdc::TileType::ADC, tile, block, num_samples);
+    local_mem_trigger(rfdc::TileType::ADC, tile, num_samples, channel_mask);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    
+    auto captured = read_adc_samples_i_q(tile, block, num_samples);
+    
+    std::cout << "  Captured " << captured.I.size() << " samples\n\n";
+    
+    // Analyze
+    auto minmax = std::minmax_element(captured.I.begin(), captured.I.end());
+    int clipped = std::count_if(captured.I.begin(), captured.I.end(),
+                                [](int16_t s) { return std::abs(s) >= 32760; });
+    
+    std::cout << "  RX Range: [" << *minmax.first << ", " << *minmax.second << "]\n";
+    std::cout << "  RX P-P: " << (*minmax.second - *minmax.first) << "\n";
+    std::cout << "  Clipped: " << clipped << " samples\n";
+    
+    if (clipped > 0) {
+        std::cout << "  ⚠️ Still clipping! Reduce amplitude below 8000\n";
+    } else if ((*minmax.second - *minmax.first) < 1000) {
+        std::cout << "  ⚠️ Signal too weak! Increase amplitude\n";
+    } else {
+        std::cout << "  ✓ Good signal level - no clipping\n";
+        
+        // Check for correct alternating pattern
+        int transitions = 0;
+        for (size_t i = 1; i < captured.I.size(); ++i) {
+            if ((captured.I[i] > 0) != (captured.I[i-1] > 0)) {
+                transitions++;
+            }
+        }
+        
+        std::cout << "  Transitions detected: " << transitions << "\n";
+        std::cout << "  Expected: ~" << (num_samples / 16) << "\n";
+    }
+    
+    // Display first few samples
+    std::cout << "\n  First 32 samples:\n  ";
+    for (size_t i = 0; i < 32 && i < captured.I.size(); ++i) {
+        std::cout << captured.I[i];
+        if (i < 31) std::cout << " ";
+    }
+    std::cout << "\n";
+    
+    save_samples_to_csv(pattern, 1e9, "pattern_tx.csv", "# TX pattern\n");
+    save_samples_to_csv(captured.I, 1e9, "pattern_rx.csv", "# RX pattern\n");
+}
+
+// ===== AMPLITUDE CALIBRATION TEST =====
+
+void RfDcApp::calibrate_amplitude()
+{
+    std::cout << "━━━ Amplitude Calibration Test ━━━\n";
+    std::cout << "  Finding optimal amplitude without clipping...\n\n";
+    
+    const uint32_t tile = 0;
+    const uint32_t block = 0;
+    const uint32_t channel_mask = 0x0001;
+    const size_t num_samples = 512;
+    
+    // Test different amplitudes
+    const std::vector<int16_t> test_amplitudes = {
+        1000, 2000, 4000, 6000, 8000, 10000, 12000, 15000, 20000
+    };
+    
+    for (auto amp : test_amplitudes) {
+        std::cout << "  Testing amplitude: " << amp << "... ";
+        
+        // Create test pattern
+        std::vector<int16_t> pattern;
+        for (size_t i = 0; i < num_samples; ++i) {
+            pattern.push_back(((i / 8) % 2) ? amp : -amp);
+        }
+        
+        // Transmit
+        local_mem_trigger(rfdc::TileType::DAC, tile, num_samples, 0x0000);
+        set_local_mem_sample(rfdc::TileType::DAC, tile, block, num_samples);
+        write_dac_samples(tile, block, pattern);
+        local_mem_trigger(rfdc::TileType::DAC, tile, num_samples, channel_mask);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        
+        // Receive
+        set_local_mem_sample(rfdc::TileType::ADC, tile, block, num_samples);
+        local_mem_trigger(rfdc::TileType::ADC, tile, num_samples, channel_mask);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        
+        auto captured = read_adc_samples_i_q(tile, block, num_samples);
+        
+        // Check for clipping
+        int clipped = std::count_if(captured.I.begin(), captured.I.end(),
+                                    [](int16_t s) { return std::abs(s) >= 32760; });
+        
+        auto minmax = std::minmax_element(captured.I.begin(), captured.I.end());
+        int16_t pp = *minmax.second - *minmax.first;
+        
+        if (clipped > 0) {
+            std::cout << "CLIPPED (" << clipped << " samples) ❌\n";
+            std::cout << "    → Amplitude " << amp << " is TOO HIGH\n";
+            break;
+        } else {
+            std::cout << "OK, P-P=" << pp << " ✓\n";
+            if (amp == test_amplitudes.back()) {
+                std::cout << "\n  ✓ Optimal amplitude: " << amp << "\n";
+            }
+        }
+    }
+    
+    std::cout << "\n  Use the highest amplitude that doesn't clip.\n";
+}
+
+
+// Helper function to calculate bit error rate
+double RfDcApp::calculate_ber(const std::string& original, const std::string& decoded)
+{
+    size_t errors = 0;
+    size_t total_bits = 0;
+    
+    size_t min_len = std::min(original.length(), decoded.length());
+    
+    for (size_t i = 0; i < min_len; ++i) {
+        uint8_t xor_result = original[i] ^ decoded[i];
+        for (int bit = 0; bit < 8; ++bit) {
+            if (xor_result & (1 << bit)) {
+                errors++;
+            }
+            total_bits++;
+        }
+    }
+    
+    // Count extra/missing bytes as all bits wrong
+    if (original.length() > decoded.length()) {
+        errors += (original.length() - decoded.length()) * 8;
+        total_bits += (original.length() - decoded.length()) * 8;
+    } else if (decoded.length() > original.length()) {
+        errors += (decoded.length() - original.length()) * 8;
+        total_bits += (decoded.length() - original.length()) * 8;
+    }
+    
+    return total_bits > 0 ? static_cast<double>(errors) / total_bits : 0.0;
+}
+
+// ===== Example Usage in main() or run() =====
+
+// In your RfDcApp::run() method, you can call:
+// run_string_loopback_test();
+
+// Or run different modulation schemes:
+void RfDcApp::test_all_modulations()
+{
+    const std::vector<codec::StringCodec::ModulationType> modes = {
+        codec::StringCodec::ModulationType::BPSK,
+        codec::StringCodec::ModulationType::QPSK,
+        codec::StringCodec::ModulationType::PSK8,
+        codec::StringCodec::ModulationType::QAM16
+    };
+    
+    const std::vector<std::string> mode_names = {
+        "BPSK (1 bit/symbol)",
+        "QPSK (2 bits/symbol)",
+        "8PSK (3 bits/symbol)",
+        "16QAM (4 bits/symbol)"
+    };
+    
+    for (size_t i = 0; i < modes.size(); ++i) {
+        std::cout << "\n\n";
+        std::cout << "╔════════════════════════════════════════════╗\n";
+        std::cout << "║  Testing: " << std::left << std::setw(32) << mode_names[i] << "║\n";
+        std::cout << "╚════════════════════════════════════════════╝\n\n";
+        
+        codec::StringCodec::Config config;
+        config.modulation = modes[i];
+        config.samples_per_symbol = 32;
+        config.amplitude = 25000;
+        
+        // Run test with this configuration
+        // ... (adapt run_string_loopback_test to accept config)
+    }
+}
+
+// Generate complex I/Q sine wave (returns AdcSamples for consistency)
+RfDcApp::AdcSamples RfDcApp::generate_iq_sine_wave(
+    double frequency_hz,           // Baseband frequency
+    double dac_pll_rate_hz,        // PLL rate
+    uint32_t dac_interpolation,
+    size_t num_samples,
+    int16_t amplitude,
+    double noise_dbfs
+)
+{
+    AdcSamples samples;
+    samples.I.resize(num_samples);
+    samples.Q.resize(num_samples);
+    samples.is_iq = true;
+    
+    // Calculate fabric sample rate
+    const double sample_rate_hz = dac_pll_rate_hz / dac_interpolation;
+    
+    const double two_pi = 2.0 * M_PI;
+    const double phase_increment = two_pi * frequency_hz / sample_rate_hz;
+    
+    // Optional noise
+    const double noise_rms = amplitude * std::pow(10.0, noise_dbfs / 20.0);
+    std::default_random_engine rng(42);
+    std::normal_distribution<double> gaussian(0.0, 1.0);
+    
+    for (size_t i = 0; i < num_samples; ++i) {
+        const double phase = phase_increment * static_cast<double>(i);
+        
+        // Generate I (cosine) and Q (sine) for complex exponential
+        const double i_signal = amplitude * std::cos(phase);
+        const double q_signal = amplitude * std::sin(phase);
+        
+        // Add noise if specified
+        const double i_noise = (noise_dbfs < 0.0) ? noise_rms * gaussian(rng) : 0.0;
+        const double q_noise = (noise_dbfs < 0.0) ? noise_rms * gaussian(rng) : 0.0;
+        
+        double i_sample = i_signal + i_noise;
+        double q_sample = q_signal + q_noise;
+        
+        // Clamp
+        if (i_sample > 32767.0) i_sample = 32767.0;
+        else if (i_sample < -32768.0) i_sample = -32768.0;
+        
+        if (q_sample > 32767.0) q_sample = 32767.0;
+        else if (q_sample < -32768.0) q_sample = -32768.0;
+        
+        samples.I[i] = static_cast<int16_t>(std::lrint(i_sample));
+        samples.Q[i] = static_cast<int16_t>(std::lrint(q_sample));
+    }
+    
+    std::cout << "  ✓ Generated " << num_samples << " I/Q samples\n";
+    std::cout << "      Baseband Freq:          " << frequency_hz / 1e6 << " MHz\n";
+    std::cout << "      DAC PLL Rate:           " << dac_pll_rate_hz / 1e9 << " GSPS\n";
+    std::cout << "      Fabric Rate:            " << sample_rate_hz / 1e6 << " MSPS\n";
+    std::cout << "      Interpolation:          " << dac_interpolation << "x\n";
+    std::cout << "      Amplitude (I/Q):        " << amplitude << " LSB\n";
+    
+    return samples;
+}
+
+// Write I/Q samples to DAC BRAM (I and Q blocks)
+void RfDcApp::write_dac_iq_samples(
+    uint32_t tile,
+    uint32_t i_block,
+    uint32_t q_block,
+    const AdcSamples& samples
+)
+{
+    if (!samples.is_iq) {
+        throw std::runtime_error("Expected I/Q samples but got REAL samples");
+    }
+    
+    if (samples.I.size() != samples.Q.size()) {
+        throw std::runtime_error("I/Q size mismatch");
+    }
+    
+    std::cout << "  Writing I/Q to DAC[" << tile << "][" 
+              << i_block << "/" << q_block << "]...\n";
+    
+    // Write I channel
+    const uint32_t size_bytes_i = samples.I.size() * sizeof(int16_t);
+    std::vector<uint8_t> raw_i(size_bytes_i);
+    std::memcpy(raw_i.data(), samples.I.data(), size_bytes_i);
+    
+    int ret = write_dac_bram_rftool_style(tile, i_block, size_bytes_i, raw_i);
+    if (ret != SUCCESS) {
+        throw std::runtime_error("Failed to write DAC I samples");
+    }
+    
+    // Write Q channel
+    const uint32_t size_bytes_q = samples.Q.size() * sizeof(int16_t);
+    std::vector<uint8_t> raw_q(size_bytes_q);
+    std::memcpy(raw_q.data(), samples.Q.data(), size_bytes_q);
+    
+    ret = write_dac_bram_rftool_style(tile, q_block, size_bytes_q, raw_q);
+    if (ret != SUCCESS) {
+        throw std::runtime_error("Failed to write DAC Q samples");
+    }
+    
+    std::cout << "    ✓ Wrote " << samples.I.size() 
+              << " I samples and " << samples.Q.size() << " Q samples\n";
+}
+
+// Save I/Q samples to separate CSV files
+void RfDcApp::save_iq_samples_to_csv(
+    const AdcSamples& samples,
+    double sample_rate_hz,
+    const std::string& i_filename,
+    const std::string& q_filename,
+    const std::string& metadata
+)
+{
+    if (!samples.is_iq) {
+        throw std::runtime_error("Expected I/Q samples but got REAL samples");
+    }
+    
+    double time_step_ns = (1.0 / sample_rate_hz) * 1e9;
+    
+    // Save I channel
+    {
+        std::ofstream file(i_filename);
+        if (!file.is_open()) {
+            throw std::runtime_error("Failed to open I file: " + i_filename);
+        }
+        
+        if (!metadata.empty()) {
+            file << metadata;
+        }
+        file << "# channel: I\n";
+        file << "sample_index,time_ns,value\n";
+        
+        for (size_t i = 0; i < samples.I.size(); ++i) {
+            file << i << "," << (i * time_step_ns) << "," << samples.I[i] << "\n";
+        }
+    }
+    
+    // Save Q channel
+    {
+        std::ofstream file(q_filename);
+        if (!file.is_open()) {
+            throw std::runtime_error("Failed to open Q file: " + q_filename);
+        }
+        
+        if (!metadata.empty()) {
+            file << metadata;
+        }
+        file << "# channel: Q\n";
+        file << "sample_index,time_ns,value\n";
+        
+        for (size_t i = 0; i < samples.Q.size(); ++i) {
+            file << i << "," << (i * time_step_ns) << "," << samples.Q[i] << "\n";
+        }
+    }
+    
+    std::cout << "    ✓ Saved: " << i_filename << " and " << q_filename << "\n";
+}
+
+// ===== Updated I/Q Loopback Test =====
+
+void RfDcApp::run_iq_loopback_test() 
+{
+    std::cout << "━━━ Running I/Q Loopback Test ━━━\n";
+    std::cout << "  Testing: DAC Tile 0 Blocks 0/1 (I/Q) → ADC Tile 0 Blocks 0/1 (I/Q)\n";
+    std::cout << "  (Loopback cables connected)\n\n";
+    
+    try {
+        const uint32_t tile = 0;
+        const uint32_t i_block = 0;
+        const uint32_t q_block = 1;
+        const uint32_t channel_mask = 0x0003;  // Enable both blocks 0 and 1
+        const size_t num_samples = 16384;
+        const double test_frequency = 50e6;  // 50 MHz baseband
+        
+        // Get DAC configuration
+        auto dac_pll = rfdc_->get_pll_config(rfdc::TileType::DAC, tile);
+        double dac_pll_rate_hz = dac_pll.sample_rate() * 1e9;
+        uint32_t dac_interpolation = rfdc_->get_interpolation_factor(tile, i_block);
+        
+        // Get ADC configuration
+        auto adc_pll = rfdc_->get_pll_config(rfdc::TileType::ADC, tile);
+        double adc_pll_rate_hz = adc_pll.sample_rate() * 1e9;
+        uint32_t adc_decimation = rfdc_->get_decimation_factor(tile, i_block);
+        
+        std::cout << "Configuration:\n";
+        std::cout << "  DAC PLL Rate: " << dac_pll.sample_rate() << " GSPS\n";
+        std::cout << "  DAC Interpolation: " << dac_interpolation << "x\n";
+        std::cout << "  ADC PLL Rate: " << adc_pll.sample_rate() << " GSPS\n";
+        std::cout << "  ADC Decimation: " << adc_decimation << "x\n\n";
+        
+        // Get mixer modes to verify I/Q configuration
+        auto dac_mixer_i = rfdc_->get_mixer_settings(rfdc::TileType::DAC, tile, i_block);
+        auto dac_mixer_q = rfdc_->get_mixer_settings(rfdc::TileType::DAC, tile, q_block);
+        
+        std::cout << "  DAC I Mixer Mode: " << rfdc_->to_string(dac_mixer_i.mode()) << "\n";
+        std::cout << "  DAC Q Mixer Mode: " << rfdc_->to_string(dac_mixer_q.mode()) << "\n\n";
+        
+        // ===== DAC I/Q PLAYBACK =====
+        std::cout << "━━━ DAC Tile 0 Blocks 0/1 (I/Q) Setup ━━━\n";
+        
+        if (!rfdc_->get_pll_lock_status(rfdc::TileType::DAC, tile)) {
+            throw std::runtime_error("DAC Tile 0 PLL not locked!");
+        }
+        std::cout << "  ✓ DAC PLL locked\n";
+        
+        std::cout << "\n  Step 1: Reset DAC memory\n";
+        local_mem_trigger(rfdc::TileType::DAC, tile, num_samples, 0x0000);
+        
+        std::cout << "  Step 2: Configure sample count for I/Q\n";
+        set_local_mem_sample(rfdc::TileType::DAC, tile, i_block, num_samples);
+        set_local_mem_sample(rfdc::TileType::DAC, tile, q_block, num_samples);
+        
+        std::cout << "  Step 3: Generate I/Q sine wave\n";
+        auto iq_samples = generate_iq_sine_wave(
+            test_frequency,
+            dac_pll_rate_hz,
+            dac_interpolation,
+            num_samples,
+            30000  // amplitude
+        );
+        
+        std::cout << "  Step 4: Write I/Q samples to DAC BRAM\n";
+        write_dac_iq_samples(tile, i_block, q_block, iq_samples);
+        
+        // Save DAC data
+        std::stringstream dac_meta;
+        dac_meta << "# RFDC DAC Configuration (I/Q Mode)\n";
+        dac_meta << "# type: DAC\n";
+        dac_meta << "# tile: " << tile << "\n";
+        dac_meta << "# i_block: " << i_block << "\n";
+        dac_meta << "# q_block: " << q_block << "\n";
+        dac_meta << "# pll_rate_mhz: " << (dac_pll_rate_hz / 1e6) << "\n";
+        dac_meta << "# interpolation: " << dac_interpolation << "\n";
+        dac_meta << "# baseband_frequency_mhz: " << (test_frequency / 1e6) << "\n";
+        dac_meta << "# num_samples: " << num_samples << "\n";
+        dac_meta << "# amplitude: 30000\n";
+        
+        save_iq_samples_to_csv(
+            iq_samples,
+            dac_pll_rate_hz / dac_interpolation,
+            "dac_i_t0_b0_50MHz.csv",
+            "dac_q_t0_b1_50MHz.csv",
+            dac_meta.str()
+        );
+        
+        std::cout << "  Step 5: **TRIGGER DAC I/Q playback**\n";
+        local_mem_trigger(rfdc::TileType::DAC, tile, num_samples, channel_mask);
+        
+        std::cout << "    Waiting 200ms for DAC to stabilize...\n";
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        std::cout << "  ✓ DAC is now outputting I/Q RF signal\n\n";
+        
+        // ===== ADC I/Q CAPTURE =====
+        std::cout << "━━━ ADC Tile 0 Blocks 0/1 (I/Q) Capture ━━━\n";
+        
+        if (!rfdc_->get_pll_lock_status(rfdc::TileType::ADC, tile)) {
+            throw std::runtime_error("ADC Tile 0 PLL not locked!");
+        }
+        std::cout << "  ✓ ADC PLL locked\n";
+        
+        std::cout << "\n  Step 1: Configure ADC capture size for I/Q\n";
+        set_local_mem_sample(rfdc::TileType::ADC, tile, i_block, num_samples);
+        set_local_mem_sample(rfdc::TileType::ADC, tile, q_block, num_samples);
+        
+        std::cout << "  Step 2: **TRIGGER ADC I/Q capture**\n";
+        local_mem_trigger(rfdc::TileType::ADC, tile, num_samples, channel_mask);
+        
+        std::cout << "    Waiting 200ms for capture to complete...\n";
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        
+        std::cout << "  Step 3: Reading captured I/Q data from ADC BRAM\n";
+        // Use the updated read_adc_samples_i_q which now handles I/Q mode
+        auto captured_iq = read_adc_samples_i_q(tile, i_block, num_samples);
+        
+        std::cout << "  ✓ Captured " << captured_iq.I.size() << " I samples and " 
+                  << captured_iq.Q.size() << " Q samples\n";
+        std::cout << "  ✓ Mode: " << (captured_iq.is_iq ? "I/Q" : "REAL") << "\n";
+        
+        // Save ADC data
+        std::stringstream adc_meta;
+        adc_meta << "# RFDC ADC Configuration (I/Q Mode)\n";
+        adc_meta << "# type: ADC\n";
+        adc_meta << "# tile: " << tile << "\n";
+        adc_meta << "# i_block: " << i_block << "\n";
+        adc_meta << "# q_block: " << q_block << "\n";
+        adc_meta << "# pll_rate_mhz: " << (adc_pll_rate_hz / 1e6) << "\n";
+        adc_meta << "# decimation: " << adc_decimation << "\n";
+        adc_meta << "# baseband_frequency_mhz: " << (test_frequency / 1e6) << "\n";
+        adc_meta << "# num_samples: " << num_samples << "\n";
+        
+        save_iq_samples_to_csv(
+            captured_iq,
+            adc_pll_rate_hz / adc_decimation,
+            "adc_i_t0_b0_capture.csv",
+            "adc_q_t0_b1_capture.csv",
+            adc_meta.str()
+        );
+        
+        // ===== ANALYSIS =====
+        std::cout << "\n━━━ Analysis ━━━\n";
+        
+        std::cout << "  I Channel - First 16 samples:\n    ";
+        for (size_t i = 0; i < std::min(size_t(16), captured_iq.I.size()); ++i) {
+            std::cout << captured_iq.I[i] << " ";
+        }
+        std::cout << "\n";
+        
+        std::cout << "  Q Channel - First 16 samples:\n    ";
+        for (size_t i = 0; i < std::min(size_t(16), captured_iq.Q.size()); ++i) {
+            std::cout << captured_iq.Q[i] << " ";
+        }
+        std::cout << "\n\n";
+        
+        // Calculate statistics for both channels
+        auto i_max = std::max_element(captured_iq.I.begin(), captured_iq.I.end());
+        auto i_min = std::min_element(captured_iq.I.begin(), captured_iq.I.end());
+        auto q_max = std::max_element(captured_iq.Q.begin(), captured_iq.Q.end());
+        auto q_min = std::min_element(captured_iq.Q.begin(), captured_iq.Q.end());
+        
+        int16_t i_pp = *i_max - *i_min;
+        int16_t q_pp = *q_max - *q_min;
+        
+        // Calculate I/Q balance
+        double i_rms = 0.0, q_rms = 0.0;
+        for (size_t i = 0; i < captured_iq.I.size(); ++i) {
+            i_rms += captured_iq.I[i] * captured_iq.I[i];
+            q_rms += captured_iq.Q[i] * captured_iq.Q[i];
+        }
+        i_rms = std::sqrt(i_rms / captured_iq.I.size());
+        q_rms = std::sqrt(q_rms / captured_iq.Q.size());
+        double iq_imbalance_db = 20 * std::log10(i_rms / (q_rms + 1e-10));
+        
+        std::cout << "  I Channel Statistics:\n";
+        std::cout << "    Max: " << *i_max << ", Min: " << *i_min 
+                  << ", P-P: " << i_pp << ", RMS: " << static_cast<int>(i_rms) << "\n";
+        
+        std::cout << "  Q Channel Statistics:\n";
+        std::cout << "    Max: " << *q_max << ", Min: " << *q_min 
+                  << ", P-P: " << q_pp << ", RMS: " << static_cast<int>(q_rms) << "\n";
+        
+        std::cout << "  I/Q Imbalance: " << std::fixed << std::setprecision(2) 
+                  << iq_imbalance_db << " dB\n";
+        
+        std::cout << "\n━━━ Result ━━━\n";
+        if (captured_iq.is_iq && i_pp > 1000 && q_pp > 1000) {
+            std::cout << "  ✓✓✓ I/Q LOOPBACK SUCCESS! ✓✓✓\n";
+            std::cout << "  Strong signals detected on both I and Q channels!\n";
+            
+            if (std::abs(iq_imbalance_db) < 1.0) {
+                std::cout << "  ✓ Excellent I/Q balance (< 1 dB)\n";
+            } else if (std::abs(iq_imbalance_db) < 3.0) {
+                std::cout << "  ✓ Good I/Q balance (< 3 dB)\n";
+            } else {
+                std::cout << "  ⚠ I/Q imbalance detected - may need QMC calibration\n";
+            }
+            
+            std::cout << "\n  To analyze results:\n";
+            std::cout << "    python3 plot_iq_loopback.py \\\n";
+            std::cout << "      dac_i_t0_b0_50MHz.csv dac_q_t0_b1_50MHz.csv \\\n";
+            std::cout << "      adc_i_t0_b0_capture.csv adc_q_t0_b1_capture.csv\n";
+        } else if (!captured_iq.is_iq) {
+            std::cout << "  ✗ ADC NOT IN I/Q MODE!\n";
+            std::cout << "  ADC detected REAL mode instead of I/Q\n";
+            std::cout << "  Check mixer configuration (should be C2C)\n";
+        } else {
+            std::cout << "  ✗ WEAK/NO SIGNAL DETECTED\n";
+            std::cout << "  I P-P: " << i_pp << ", Q P-P: " << q_pp << "\n";
+            std::cout << "  Check:\n";
+            std::cout << "    - Loopback cables connected to correct channels\n";
+            std::cout << "    - DAC/ADC gains and attenuation\n";
+            std::cout << "    - Mixer mode configuration (should be C2C)\n";
+        }
+        
+    } catch (const std::exception& e) {
+        std::cerr << "\n✗ Error: " << e.what() << "\n";
+    }
+}
+

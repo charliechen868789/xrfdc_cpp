@@ -13,6 +13,7 @@
 #include "gpio.hpp"
 #include "LocalMem.hpp"
 #include "ClockWizard.hpp"
+#include "StringCodec.hpp"
 
 class RfDcApp
 {
@@ -162,6 +163,7 @@ private:
     
     // Test methods
     void run_loopback_test();
+    void run_string_loopback_test();
     void display_status();
     void save_samples_to_csv(const std::vector<int16_t>& samples,
                             double sample_rate_hz,
@@ -202,11 +204,43 @@ private:
         double noise_dbfs,
         rfdc::DataPathMode datapath
     );
+
+    AdcSamples generate_iq_sine_wave(
+        double frequency_hz,
+        double dac_pll_rate_hz,
+        uint32_t dac_interpolation,
+        size_t num_samples,
+        int16_t amplitude,
+        double noise_dbfs = -60.0
+    );
+
     std::vector<int16_t> generate_dc_offset(int16_t value, size_t num_samples);
 
     void update_pll_sample_rate(
         rfdc::TileType type,
         uint32_t tile,
         double desired_sample_rate_hz
+    );
+    double calculate_ber(const std::string& original, const std::string& decoded);
+    void test_all_modulations();
+    //void run_minimal_string_test();      // ⭐ Start with this one!
+    //void manual_decode_test();            // For deep debugging
+    void calibrate_amplitude();
+    void run_simple_pattern_test();
+    void run_codec_diagnostic_test();
+    void run_iq_loopback_test();
+    void write_dac_iq_samples(
+        uint32_t tile,
+        uint32_t i_block,
+        uint32_t q_block,
+        const AdcSamples& samples
+    );
+
+    void save_iq_samples_to_csv(
+        const AdcSamples& samples,
+        double sample_rate_hz,
+        const std::string& i_filename,
+        const std::string& q_filename,
+        const std::string& metadata
     );
 };

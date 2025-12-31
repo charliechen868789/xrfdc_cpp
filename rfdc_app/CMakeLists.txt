@@ -103,6 +103,7 @@ PRIVATE
     src/RfdcApp.cpp
     src/ClockWizard.cpp
     src/gpio.cpp
+    src/StringCodec.cpp
 )
 
 set(USER_INCLUDE_DIRECTORIES
