@@ -1,0 +1,68 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"type": "tcf-debug",
+			"request": "launch",
+			"name": "rpu_app_app_hw_1",
+			"debugType": "baremetal-zu",
+			"attachToRunningTargetOptions": {
+				"targetSetupMode": "standalone",
+				"executeScript": false,
+				"scriptPath": ""
+			},
+			"autoAttachProcessChildren": false,
+			"target": {
+				"targetConnectionId": "Local",
+				"peersIniPath": "../../../.wsdata/.peers.ini",
+				"context": "ZUPlus"
+			},
+			"targetSetup": {
+				"resetSystem": true,
+				"programDevice": true,
+				"enableRPUSplitMode": false,
+				"resetAPU": true,
+				"resetRPU": true,
+				"bitstreamFile": "${workspaceFolder}/rpu_app/_ide/bitstream/rfip_example_design_pm.bit",
+				"zuInitialization": {
+					"isFsbl": true,
+					"usingFSBL": {
+						"initWithFSBL": true,
+						"fsblFile": "${workspaceFolder}/platform_bare_metal_r5/export/platform_bare_metal_r5/sw/boot/fsbl.elf",
+						"fsblExitSymbol": "XFsbl_Exit"
+					},
+					"usingPsuInit": {
+						"runPsuInit": true,
+						"plPowerup": false,
+						"psuInitTclFile": "${workspaceFolder}/rpu_app/_ide/psinit/psu_init.tcl"
+					}
+				},
+				"downloadElf": [
+					{
+						"core": "psu_cortexa53_0",
+						"resetProcessor": false,
+						"elfFile": "/home/charlie/Avnet/Vitis_App/apu_app_pm/build/apu_app_pm.elf",
+						"stopAtEntry": false
+					},
+					{
+						"core": "psu_cortexr5_0",
+						"resetProcessor": false,
+						"elfFile": "/home/charlie/Avnet/Vitis_App/rpu_app/build/rpu_app.elf",
+						"stopAtEntry": false
+					},
+					{
+						"core": "psu_pmu_0",
+						"resetProcessor": false,
+						"elfFile": "/home/charlie/Avnet/Vitis_App/zynqmp_pmufw/build/zynqmp_pmufw.elf",
+						"stopAtEntry": false
+					}
+				],
+				"crossTriggerBreakpoints": {
+					"isSelected": false,
+					"breakpoints": []
+				}
+			},
+			"internalConsoleOptions": "openOnSessionStart"
+		}
+	]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "rpu_app",
+  "type": "HOST",
+  "platform": "/home/charlie/Avnet/Vitis_App/platform_bare_metal_r5/export/platform_bare_metal_r5/platform_bare_metal_r5.xpfm",
+  "domain": "standalone_psu_cortexr5_0",
+  "cpuInstance": "psu_cortexr5_0",
+  "cpuType": "cortex-r5",
+  "os": "standalone",
+  "configuration": {
+    "componentType": "HOST",
+    "hostToolchainConfigurations": []
+  },
+  "domainRealName": "standalone_psu_cortexr5_0",
+  "applicationFlow": "EMBEDDED"
+}
