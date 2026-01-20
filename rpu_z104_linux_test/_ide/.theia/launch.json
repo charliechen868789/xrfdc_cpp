@@ -1,0 +1,56 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"type": "tcf-debug",
+			"request": "launch",
+			"name": "rpu_z104_linux_test_app_hw_1",
+			"debugType": "baremetal-zu",
+			"attachToRunningTargetOptions": {
+				"targetSetupMode": "attach",
+				"executeScript": false,
+				"scriptPath": ""
+			},
+			"autoAttachProcessChildren": false,
+			"target": {
+				"targetConnectionId": "Local",
+				"peersIniPath": "../../../.wsdata/.peers.ini",
+				"context": "ZUPlus"
+			},
+			"targetSetup": {
+				"resetSystem": false,
+				"programDevice": true,
+				"enableRPUSplitMode": false,
+				"resetAPU": false,
+				"resetRPU": false,
+				"bitstreamFile": "${workspaceFolder}/rpu_z104_linux_test/_ide/bitstream/rfip_example_design_led_address.bit",
+				"zuInitialization": {
+					"isFsbl": false,
+					"usingFSBL": {
+						"initWithFSBL": false,
+						"fsblFile": "${workspaceFolder}/platform_uart_led_r5/export/platform_uart_led_r5/sw/boot/fsbl.elf",
+						"fsblExitSymbol": "XFsbl_Exit"
+					},
+					"usingPsuInit": {
+						"runPsuInit": false,
+						"plPowerup": false,
+						"psuInitTclFile": "${workspaceFolder}/rpu_z104_linux_test/_ide/psinit/psu_init.tcl"
+					}
+				},
+				"downloadElf": [
+					{
+						"core": "psu_cortexr5_0",
+						"resetProcessor": true,
+						"elfFile": "${workspaceFolder}/rpu_z104_linux_test/build/rpu_z104_linux_test.elf",
+						"stopAtEntry": false
+					}
+				],
+				"crossTriggerBreakpoints": {
+					"isSelected": false,
+					"breakpoints": []
+				}
+			},
+			"internalConsoleOptions": "openOnSessionStart"
+		}
+	]
+}
