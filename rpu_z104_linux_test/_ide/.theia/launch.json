@@ -7,7 +7,7 @@
 			"name": "rpu_z104_linux_test_app_hw_1",
 			"debugType": "baremetal-zu",
 			"attachToRunningTargetOptions": {
-				"targetSetupMode": "attach",
+				"targetSetupMode": "standalone",
 				"executeScript": false,
 				"scriptPath": ""
 			},
@@ -20,7 +20,7 @@
 			"targetSetup": {
 				"resetSystem": false,
 				"programDevice": true,
-				"enableRPUSplitMode": false,
+				"enableRPUSplitMode": true,
 				"resetAPU": false,
 				"resetRPU": false,
 				"bitstreamFile": "${workspaceFolder}/rpu_z104_linux_test/_ide/bitstream/rfip_example_design_led_address.bit",

@@ -66,6 +66,8 @@ set(USER_COMPILE_OPTIMIZATION_OTHER_FLAGS )
 # Debug level "" [None], "-g1" [Minimum], "g2" [Default], "g3" [Maximim]
 set(USER_COMPILE_DEBUG_LEVEL -g3)
 
+set(USER_COMPILE_OPTIMIZATION_LEVEL -Os)
+
 # Other flags releated to debugging
 set(USER_COMPILE_DEBUG_OTHER_FLAGS )
 

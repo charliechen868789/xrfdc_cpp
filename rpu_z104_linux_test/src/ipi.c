@@ -93,14 +93,14 @@ static XStatus IpiConfigure(XScuGic *const GicInst, XIpiPsu *const IpiInst)
 	IpiCfgPtr = XIpiPsu_LookupConfig(IPI_BASEADDR);
 	if (NULL == IpiCfgPtr) {
 		Status = XST_FAILURE;
-		xil_printf("%s ERROR in getting CfgPtr\n", __func__);
+		//xil_printf("%s ERROR in getting CfgPtr\n", __func__);
 		goto done;
 	}
 
 	/* Init with the Cfg Data */
 	Status = XIpiPsu_CfgInitialize(IpiInst, IpiCfgPtr, IpiCfgPtr->BaseAddress);
 	if (XST_SUCCESS != Status) {
-		xil_printf("%s ERROR #%d in configuring IPI\n", __func__, Status);
+		//xil_printf("%s ERROR #%d in configuring IPI\n", __func__, Status);
 		goto done;
 	}
 
@@ -112,7 +112,7 @@ static XStatus IpiConfigure(XScuGic *const GicInst, XIpiPsu *const IpiInst)
 	}
 	Status = XScuGic_Connect(GicInst, IPI_INT_ID, (Xil_ExceptionHandler)IpiIrqHandler, IpiInst);
 	if (XST_SUCCESS != Status) {
-		xil_printf("%s ERROR #%d in GIC connect\n", __func__, Status);
+		//xil_printf("%s ERROR #%d in GIC connect\n", __func__, Status);
 		goto done;
 	}
 
@@ -133,10 +133,10 @@ static void PmIpiCallback(XIpiPsu *const InstancePtr)
 	XStatus status;
 	u32 pl[PAYLOAD_ARG_CNT];
 
-	status = XIpiPsu_ReadMessage(InstancePtr, 0x00020000U, pl,
+	status = XIpiPsu_ReadMessage(InstancePtr, SRC_IPI_MASK, pl,
 				     PAYLOAD_ARG_CNT, XIPIPSU_BUF_TYPE_MSG);
 	if (status != XST_SUCCESS) {
-		xil_printf("ERROR #%d while reading IPI buffer\n", status);
+		//xil_printf("ERROR #%d while reading IPI buffer\n", status);
 		return;
 	}
 
@@ -159,7 +159,7 @@ static void PmIpiCallback(XIpiPsu *const InstancePtr)
 		break;
 #endif
 	default:
-		xil_printf("%s ERROR, unrecognized PM-API ID: %d\n", __func__, pl[0]);
+		//xil_printf("%s ERROR, unrecognized PM-API ID: %d\n", __func__, pl[0]);
 		break;
 	}
 }
@@ -184,11 +184,11 @@ XStatus IpiInit(XScuGic *const GicInst, XIpiPsu *const InstancePtr)
 
 	Status = IpiConfigure(GicInst, InstancePtr);
 	if (XST_SUCCESS != Status) {
-		xil_printf("IpiConfigure() failed with error: %d\r\n", Status);
+		//xil_printf("IpiConfigure() failed with error: %d\r\n", Status);
 		goto done;
 	}
 
-	Status = IpiRegisterCallback(InstancePtr, 0x00020000U , PmIpiCallback);
+	Status = IpiRegisterCallback(InstancePtr, SRC_IPI_MASK, PmIpiCallback);
 
 done:
 	return Status;

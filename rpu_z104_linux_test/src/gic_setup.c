@@ -17,13 +17,13 @@ s32 GicSetupInterruptSystem(XScuGic *GicInst)
 
 	XScuGic_Config *GicCfgPtr = XScuGic_LookupConfig(INTC_DEVICE_ID);
 	if (NULL == GicCfgPtr) {
-		xil_printf("XScuGic_LookupConfig() failed\r\n");
+		//xil_printf("XScuGic_LookupConfig() failed\r\n");
 		goto done;
 	}
 
 	Status = XScuGic_CfgInitialize(GicInst, GicCfgPtr, GicCfgPtr->CpuBaseAddress);
 	if (XST_SUCCESS != Status) {
-		xil_printf("XScuGic_CfgInitialize() failed with error: %d\r\n", Status);
+		//xil_printf("XScuGic_CfgInitialize() failed with error: %d\r\n", Status);
 		goto done;
 	}
 
@@ -57,13 +57,13 @@ s32 GicResume(XScuGic *GicInst)
 
 	XScuGic_Config *GicCfgPtr = XScuGic_LookupConfig(INTC_DEVICE_ID);
 	if (NULL == GicCfgPtr) {
-		xil_printf("XScuGic_LookupConfig() failed\r\n");
+		//xil_printf("XScuGic_LookupConfig() failed\r\n");
 		goto done;
 	}
 
 	Status = XScuGic_CfgInitialize(GicInst, GicCfgPtr, GicCfgPtr->CpuBaseAddress);
 	if (XST_SUCCESS != Status) {
-		xil_printf("XScuGic_CfgInitialize() failed with error: %d\r\n", Status);
+		//xil_printf("XScuGic_CfgInitialize() failed with error: %d\r\n", Status);
 		goto done;
 	}
 

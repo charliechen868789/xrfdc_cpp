@@ -34,7 +34,7 @@ XStatus PmInit(XScuGic *const GicInst, XIpiPsu *const IpiInst)
 	if (NULL != GicInst) {
 		Status = GicSetupInterruptSystem(GicInst);
 		if (Status != XST_SUCCESS) {
-			xil_printf("GicSetupInterruptSystem() failed with error: %d\r\n", Status);
+			//xil_printf("GicSetupInterruptSystem() failed with error: %d\r\n", Status);
 			goto done;
 		}
 	}
@@ -42,14 +42,14 @@ XStatus PmInit(XScuGic *const GicInst, XIpiPsu *const IpiInst)
 	/* IPI Initialize */
         Status = IpiInit(GicInst, IpiInst);
         if (XST_SUCCESS != Status) {
-                xil_printf("IpiInit() failed with error: %d\r\n", Status);
+                //xil_printf("IpiInit() failed with error: %d\r\n", Status);
                 goto done;
         }
 
 	/* XilPM Initialize */
         Status = XPm_InitXilpm(IpiInst);
         if (XST_SUCCESS != Status) {
-                xil_printf("XPm_InitXilpm() failed with error: %d\r\n", Status);
+                //xil_printf("XPm_InitXilpm() failed with error: %d\r\n", Status);
                 goto done;
         }
 
@@ -57,7 +57,7 @@ XStatus PmInit(XScuGic *const GicInst, XIpiPsu *const IpiInst)
 	/* TTC_3 is required for sleep functionality */
 	Status = XPm_RequestNode(PM_DEV_TTC_2, PM_CAP_ACCESS, 0, 0);
 	if (XST_SUCCESS != Status) {
-		xil_printf("XPm_RequestNode of TTC_3 is failed with error: %d\r\n", Status);
+		//xil_printf("XPm_RequestNode of TTC_3 is failed with error: %d\r\n", Status);
 		goto done;
 	}
 #endif
@@ -65,7 +65,7 @@ XStatus PmInit(XScuGic *const GicInst, XIpiPsu *const IpiInst)
 	/* Finalize Initialization */
         Status = XPm_InitFinalize();
         if (XST_SUCCESS != Status) {
-                xil_printf("XPm_initfinalize() failed\r\n");
+                //xil_printf("XPm_initfinalize() failed\r\n");
                 goto done;
         }
 

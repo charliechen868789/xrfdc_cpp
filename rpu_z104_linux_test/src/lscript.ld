@@ -15,7 +15,7 @@ _UNDEF_STACK_SIZE = DEFINED(_UNDEF_STACK_SIZE) ? _UNDEF_STACK_SIZE : 1024;
 MEMORY
 {
 	psu_r5_0_atcm_MEM_0 : ORIGIN = 0x0, LENGTH = 0x10000
-	psu_r5_0_btcm_MEM_0 : ORIGIN = 0x20000, LENGTH = 0x20000
+	psu_r5_0_btcm_MEM_0 : ORIGIN = 0x20000, LENGTH = 0x10000
 	psu_r5_tcm_ram_0_MEM_0 : ORIGIN = 0x0, LENGTH = 0x40000
 	psu_ddr_0 : ORIGIN = 0x100000, LENGTH = 0x7fefffff
 	psu_qspi_linear_0 : ORIGIN = 0xc0000000, LENGTH = 0x20000000
@@ -37,7 +37,7 @@ SECTIONS
 
 .bootdata : {
    *(.bootdata)
-} > psu_r5_0_atcm_MEM_0
+} > psu_r5_0_btcm_MEM_0
 
 .text : {
    *(.text)
@@ -63,11 +63,11 @@ SECTIONS
 
 .interp : {
    KEEP (*(.interp))
-} > psu_r5_0_btcm_MEM_0
+} > psu_r5_0_atcm_MEM_0
 
 .note-ABI-tag : {
    KEEP (*(.note-ABI-tag))
-} > psu_r5_0_btcm_MEM_0
+} > psu_r5_0_atcm_MEM_0
 
 .rodata : {
    __rodata_start = .;
@@ -75,14 +75,14 @@ SECTIONS
    *(.rodata.*)
    *(.gnu.linkonce.r.*)
    __rodata_end = .;
-} > psu_r5_0_btcm_MEM_0
+} > psu_r5_0_atcm_MEM_0
 
 .rodata1 : {
    __rodata1_start = .;
    *(.rodata1)
    *(.rodata1.*)
    __rodata1_end = .;
-} > psu_r5_0_btcm_MEM_0
+} > psu_r5_0_atcm_MEM_0
 
 .sdata2 : {
    __sdata2_start = .;
@@ -90,7 +90,7 @@ SECTIONS
    *(.sdata2.*)
    *(.gnu.linkonce.s2.*)
    __sdata2_end = .;
-} > psu_r5_0_btcm_MEM_0
+} > psu_r5_0_atcm_MEM_0
 
 .sbss2 : {
    __sbss2_start = .;
@@ -98,7 +98,7 @@ SECTIONS
    *(.sbss2.*)
    *(.gnu.linkonce.sb2.*)
    __sbss2_end = .;
-} > psu_r5_0_btcm_MEM_0
+} > psu_r5_0_atcm_MEM_0
 
 .data : {
    __data_start = .;
@@ -109,18 +109,18 @@ SECTIONS
    *(.got)
    *(.got.plt)
    __data_end = .;
-} > psu_r5_0_btcm_MEM_0
+} > psu_r5_0_atcm_MEM_0
 
 .data1 : {
    __data1_start = .;
    *(.data1)
    *(.data1.*)
    __data1_end = .;
-} > psu_r5_0_btcm_MEM_0
+} > psu_r5_0_atcm_MEM_0
 
 .got : {
    *(.got)
-} > psu_r5_0_btcm_MEM_0
+} > psu_r5_0_atcm_MEM_0
 
 .ctors : {
    __CTOR_LIST__ = .;
@@ -131,7 +131,7 @@ SECTIONS
    KEEP (*(.ctors))
    __CTOR_END__ = .;
    ___CTORS_END___ = .;
-} > psu_r5_0_btcm_MEM_0
+} > psu_r5_0_atcm_MEM_0
 
 .dtors : {
    __DTOR_LIST__ = .;
@@ -253,7 +253,7 @@ SECTIONS
    *(COMMON)
    . = ALIGN(4);
    __bss_end__ = .;
-} > psu_r5_0_btcm_MEM_0
+} > psu_r5_0_atcm_MEM_0
 
 _SDA_BASE_ = __sdata_start + ((__sbss_end - __sdata_start) / 2 );
 
@@ -269,7 +269,7 @@ _SDA2_BASE_ = __sdata2_start + ((__sbss2_end - __sdata2_start) / 2 );
    . += _HEAP_SIZE;
    _heap_end = .;
    HeapLimit = .;
-} > psu_r5_0_btcm_MEM_0
+} > psu_r5_0_atcm_MEM_0
 
 .stack (NOLOAD) : {
    . = ALIGN(16);
@@ -297,7 +297,7 @@ _SDA2_BASE_ = __sdata2_start + ((__sbss2_end - __sdata2_start) / 2 );
    . += _UNDEF_STACK_SIZE;
    . = ALIGN(16);
    __undef_stack = .;
-} > psu_r5_0_btcm_MEM_0
+} > psu_r5_0_atcm_MEM_0
 
 end = .;
 }

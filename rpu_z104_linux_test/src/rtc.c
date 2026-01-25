@@ -40,23 +40,23 @@ int PmRtcInit(XScuGic *const GicInst, XRtcPsu *RtcInstPtr)
 	int Status = XST_FAILURE;
 	XRtcPsu_Config *Config;
 
-//#if defined(versal)
+#if defined(versal)
 	Status = XPm_RequestNode(RTC_DEVICE, PM_CAP_ACCESS, QOS_VAL, REQUEST_ACK_BLOCKING);
 	if (XST_SUCCESS != Status) {
-		xil_printf("RPU: XPm_RequestNode failed with error: %d\n", Status);
+		//xil_printf("RPU: XPm_RequestNode failed with error: %d\n", Status);
 		goto done;
 	}
-//#endif
+#endif
 
 	Config = XRtcPsu_LookupConfig(RTC_DEVICE_ID);
 	if (NULL == Config) {
-		xil_printf("RPU: %s ERROR in getting CfgPtr\n", __func__);
+		//xil_printf("RPU: %s ERROR in getting CfgPtr\n", __func__);
 		goto done;
 	}
 
 	Status = XRtcPsu_CfgInitialize(RtcInstPtr, Config, Config->BaseAddr);
 	if (XST_SUCCESS != Status) {			
-		xil_printf("RPU: %s ERROR in_CfgInitialize\n", __func__);
+		//xil_printf("RPU: %s ERROR in_CfgInitialize\n", __func__);
 		goto done;
 	}
 
@@ -66,7 +66,7 @@ int PmRtcInit(XScuGic *const GicInst, XRtcPsu *RtcInstPtr)
 				 (Xil_ExceptionHandler)XRtcPsu_InterruptHandler,
 				 (void *)RtcInstPtr);
 	if (XST_SUCCESS != Status) {
-		xil_printf("RPU: %s ERROR #%d in GIC connect\n", __func__, Status);
+		//xil_printf("RPU: %s ERROR #%d in GIC connect\n", __func__, Status);
 		goto done;
 	}
 

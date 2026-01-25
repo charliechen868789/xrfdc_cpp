@@ -4,8 +4,10 @@
 #include "ipi.h"
 #include "rtc.h"
 #include "xilfpga.h"
+#include "psgpio.h"
 #include "xparameters.h"
 #include "xuartps.h"
+#include "config.h"
 
 extern u32 CountsPerSec;
 
@@ -60,6 +62,7 @@ u32 DelayVal;
 u32 IterationCnt;
 
 ///
+static XGpioPs PsGpioInst;
 static XFpga XFpgaInstance = {0U};
 ///
 #define PGGS3_REG			(0xFFD8005C)
@@ -124,6 +127,13 @@ static int InitApp(void)
 		goto done;
 	}
 
+	Status = PsGpioInit(&PsGpioInst);
+	if (XST_SUCCESS != Status) {
+		//xil_printf("RPU: Error 0x%x in PsGpioInit\r\n", Status);
+		goto done;
+	}
+	ClrTestPoint(&PsGpioInst, PIN_TP1);
+	ClrTestPoint(&PsGpioInst, PIN_TP2);
 
 done:
 	return Status;
@@ -268,6 +278,7 @@ int main()
 		}
 
 		/* Waking up APU */
+		SetTestPoint(&PsGpioInst, PIN_TP1);
 		tStart = ReadTime();
 		Status = XPm_RequestWakeUp(WAKEUP_TARGET, 0, 0, BLOCKING_ACK);
 		tEnd = ReadTime();
@@ -319,8 +330,10 @@ int main()
 		}
 
 		tStart = ReadTime();
+		SetTestPoint(&PsGpioInst, PIN_TP2);
 		Status = XFpga_BitStream_Load(&XFpgaInstance, BitAddr, KeyAddr,
 					      BITSTREAM_SIZE, XFPGA_FULLBIT_EN);
+		ClrTestPoint(&PsGpioInst, PIN_TP2);
 		tEnd = ReadTime();
 		PlLatency = CALCULATE_LATENCY(tEnd - tStart);
 		//xil_printf("RPU: [ PL programming duration in micro seconds: %ld ]\r\n", PlLatency);
@@ -366,7 +379,9 @@ int main()
 	/* Power down PL */
 	//xil_printf("RPU: Powering down PL\r\n");
 	tStart = ReadTime();
+	SetTestPoint(&PsGpioInst, PIN_TP2);
 	Status = XPm_ForcePowerDown(PL_NODE, BLOCKING_ACK);
+	ClrTestPoint(&PsGpioInst, PIN_TP2);
 	tEnd = ReadTime();
 	if (XST_SUCCESS != Status) {
 		//xil_printf("RPU: Error 0x%x in ForcePowerDown of 0x%x\r\n", Status, PL_NODE);
@@ -411,7 +426,7 @@ int main()
 	SyncClearReady(SYNC_APU_MASK);
     //NODE_APU_0
 	//Status = XPm_RequestSuspend(SUSPEND_TARGET, NON_BLOCKING_ACK, LATENCY_VAL, 0);
-    Status = XPm_RequestSuspend(NODE_APU, NON_BLOCKING_ACK, LATENCY_VAL, 0); 
+    Status = XPm_RequestSuspend(NODE_APU_0, NON_BLOCKING_ACK, LATENCY_VAL, 0); 
     // TODO: Need further check this call
     
 	IpiWaitForAck();
