@@ -73,9 +73,9 @@ u32 IterationCnt;
 
 /* IPI message flags */
 static volatile int ipi_msg_received = 0;
-static u32 received_msg_type = 0;
-static u32 received_param1 = 0;
-static u32 received_param2 = 0;
+static volatile u32 received_msg_type = 0;
+static volatile u32 received_param1 = 0;
+static volatile u32 received_param2 = 0;
 
 ///
 static XFpga XFpgaInstance = {0U};
@@ -384,9 +384,6 @@ static int ReceiveIpiMessage(u32 expectedMsgType, u32 timeoutMs)
 #endif
 static int ReceiveIpiMessage(u32 expectedMsgType, u32 timeoutMs)
 {
-	u64 startTime = ReadTime();
-	u64 timeoutUs = (u64)timeoutMs * 1000ULL;
-	
 	ipi_msg_received = 0;
 	
 	while (1) {
@@ -401,11 +398,7 @@ static int ReceiveIpiMessage(u32 expectedMsgType, u32 timeoutMs)
 			}
 		}
 		
-		// **CHANGE: Only check timeout if timeoutMs > 0**
-		if (timeoutMs > 0 && CALCULATE_LATENCY(ReadTime() - startTime) >= timeoutUs) {
-			return XST_FAILURE;
-		}
-		
+		// No timeout check - wait forever
 		for (volatile u32 i = 0; i < 1000; i++);
 	}
 }
@@ -532,6 +525,11 @@ int main()
 		//SyncWaitForReady(SYNC_PL_UP);
 		//SyncClearReady(SYNC_PL_UP);
 		//xil_printf("RPU: Powering up PL\r\n");
+        Status = ReceiveIpiMessage(IPI_MSG_PL_UP, 1800000);
+        if (Status != XST_SUCCESS) {
+            //xil_printf("RPU: TIMEOUT\r\n");
+            goto done;
+        }      
 		tStart = ReadTime();
 		Status = XPm_RequestNode(NODE_PL, PM_CAP_ACCESS, 0, BLOCKING_ACK);
 		tEnd = ReadTime();
@@ -665,7 +663,7 @@ int main()
 
     //NODE_APU_0
 	//Status = XPm_RequestSuspend(SUSPEND_TARGET, NON_BLOCKING_ACK, LATENCY_VAL, 0);
-    Status = XPm_RequestSuspend(NODE_APU_0, NON_BLOCKING_ACK, LATENCY_VAL, 0); 
+    Status = XPm_RequestSuspend(NODE_APU, NON_BLOCKING_ACK, LATENCY_VAL, 0); 
     // TODO: Need further check this call
     
 	IpiWaitForAck();
