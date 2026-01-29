@@ -6,6 +6,7 @@
 #include "xilfpga.h"
 #include "xparameters.h"
 #include "xuartps.h"
+#include "xil_mmu.h"
 
 extern u32 CountsPerSec;
 
@@ -27,6 +28,14 @@ extern void __attribute__((weak)) *_vector_table;
 /* Calculate latency from counter ticks to microseconds */
 #define CALCULATE_LATENCY(x)		((x) / (CountsPerSec / 1000000) )
 
+/* IPI Message Types */
+#define IPI_MSG_RPU_FINISH		0x5A5A5A5AU
+#define IPI_MSG_RPU_SIGNAL		0xAAAAAAAAU
+#define IPI_MSG_APU_FINISH		0x5A000000U
+#define IPI_MSG_PL_DOWN			0x00000011U
+#define IPI_MSG_PL_UP			0x00000012U
+#define IPI_MSG_PARAMS			0xDEADBEEFU
+
 #define SYNC_APU_MASK			(0x000000FFU)
 #define SYNC_RPU_MASK			(0x0000FF00U)
 #define SYNC_DELAY_VAL_MASK		(0x00FF0000U)
@@ -40,6 +49,9 @@ extern void __attribute__((weak)) *_vector_table;
 #define SYNC_RPU_FINISH			(0x00005500U)
 #define SYNC_PL_DOWN			(0x00000011U)
 #define SYNC_PL_UP			(0x00000012U)
+
+#define RPU0_REQ_BUF_ADDR   0xFF990040U  // Incoming from APU
+#define APU_REQ_BUF_ADDR    0xFF990000U  // Outgoing to APU
 
 #define PRINT_RPU_ON_APU_ON			xil_printf("RPU: ******************************** RPU ON, APU ON *********************************\r\n")
 #define PRINT_RPU_ON_APU_SUSPEND	xil_printf("RPU: *********************** RPU ON, APU suspended with FPD ON ***********************\r\n")
@@ -59,14 +71,33 @@ u64 tNotify;
 u32 DelayVal;
 u32 IterationCnt;
 
+/* IPI message flags */
+static volatile int ipi_msg_received = 0;
+static u32 received_msg_type = 0;
+static u32 received_param1 = 0;
+static u32 received_param2 = 0;
+
 ///
 static XFpga XFpgaInstance = {0U};
 ///
 #define PGGS3_REG			(0xFFD8005C)
-
+#define IPI_APU_CH_MASK		0x00000001U
+#define IPI_RPU0_CH_MASK    0x00000002U  // RPU0 is Self
+#define IPI_MSG_ACK         0xAAAAAAAAU  // The code the script is waiting for
 
 static XUartPs UartInst;
 
+/* CRITICAL: Mark IPI buffer region as non-cacheable */
+#if 0 
+static void ConfigureIpiBufferMemory(void)
+{
+	// Set IPI buffer region (0xFF990000 - 0xFF99FFFF) as Device memory (non-cacheable)
+	// This is CRITICAL for cache coherency
+	Xil_SetTlbAttributes(0xFF990000, 0x04de2);  // Device memory attributes
+	
+	xil_printf("RPU: IPI buffer configured as non-cacheable\r\n");
+}
+#endif
 static int InitUart0WithDriver(void)
 {
     XUartPs_Config *Config;
@@ -108,10 +139,108 @@ static XPm_Notifier notifier = {
 	.flags = 0,
 };
 
+/* Custom IPI Handler - FIXED VERSION */
+#if 0
+void CustomIpiHandler(XIpiPsu *InstancePtr) {
+    volatile u32 *RawBuf = (volatile u32 *)RPU0_REQ_BUF_ADDR;
+    u32 msg_val;
+    int retries = 100;
+    
+    // **FIX 1: Invalidate cache BEFORE reading**
+    Xil_DCacheInvalidateRange((INTPTR)RawBuf, 16);
+    __asm__ __volatile__ ("dsb sy" : : : "memory");
+    __asm__ __volatile__ ("isb" : : : "memory");
+    
+    // **FIX 2: Retry reading until valid data appears**
+    while (retries > 0) {
+        msg_val = RawBuf[0];
+        
+        if (msg_val != 0xFFFFFFFF && msg_val != 0x00000000) {
+            break;
+        }
+        
+        // Small delay and retry
+        for (volatile int i = 0; i < 200; i++);
+        
+        // Re-invalidate cache before retry
+        Xil_DCacheInvalidateRange((INTPTR)RawBuf, 16);
+        __asm__ __volatile__ ("dsb sy" : : : "memory");
+        
+        retries--;
+    }
+    
+    //xil_printf("RPU: IPI Handler - Msg: 0x%08X (retries: %d)\r\n", msg_val, 100 - retries);
+    
+    if (msg_val != 0xFFFFFFFF && msg_val != 0x00000000) {
+        received_msg_type = RawBuf[0];
+        received_param1   = RawBuf[1];
+        received_param2   = RawBuf[2];
+        ipi_msg_received  = 1;
+        
+        //xil_printf("RPU: Captured: Type=0x%08X, P1=0x%08X, P2=0x%08X\r\n", 
+        //           received_msg_type, received_param1, received_param2);
+        
+        // Clear buffer
+        //RawBuf[0] = 0; 
+        //RawBuf[1] = 0;
+        //RawBuf[2] = 0;
+        
+        // **FIX 3: Flush cache after clearing**
+        //Xil_DCacheFlushRange((INTPTR)RawBuf, 16);
+    } else {
+        xil_printf("RPU: WARNING - Empty buffer after retries\r\n");
+    }
+    
+    XIpiPsu_ClearInterruptStatus(InstancePtr, IPI_APU_CH_MASK);
+}
+#endif
+
+void CustomIpiHandler(XIpiPsu *InstancePtr) {
+    volatile u32 *RawBuf = (volatile u32 *)RPU0_REQ_BUF_ADDR;
+    u32 msg_val;
+    int retries = 100;
+    
+    // Cache invalidation
+    Xil_DCacheInvalidateRange((INTPTR)RawBuf, 16);
+    __asm__ __volatile__ ("dsb sy" : : : "memory");
+    __asm__ __volatile__ ("isb" : : : "memory");
+    
+    // Retry until data appears
+    while (retries > 0) {
+        msg_val = RawBuf[0];
+        if (msg_val != 0xFFFFFFFF && msg_val != 0x00000000) {
+            break;
+        }
+        for (volatile int i = 0; i < 200; i++);
+        Xil_DCacheInvalidateRange((INTPTR)RawBuf, 16);
+        __asm__ __volatile__ ("dsb sy" : : : "memory");
+        retries--;
+    }
+    
+    if (msg_val != 0xFFFFFFFF && msg_val != 0x00000000) {
+        received_msg_type = RawBuf[0];
+        received_param1   = RawBuf[1];
+        received_param2   = RawBuf[2];
+        ipi_msg_received  = 1;
+        
+        // Clear buffer
+        RawBuf[0] = 0; 
+        RawBuf[1] = 0;
+        RawBuf[2] = 0;
+        Xil_DCacheFlushRange((INTPTR)RawBuf, 16);
+    }
+    
+    // **CRITICAL: Clear ISR to acknowledge interrupt AND clear sender's OBS bit**
+    XIpiPsu_ClearInterruptStatus(InstancePtr, IPI_APU_CH_MASK);
+    
+    // **ADDITIONAL: Make sure the clear is visible**
+    __asm__ __volatile__ ("dsb sy" : : : "memory");
+}
+
 static int InitApp(void)
 {
 	int Status;
-
+    //ConfigureIpiBufferMemory();
 	Status = PmInit(&GicInst, &IpiInst);
 	if (Status != XST_SUCCESS) {
 		//xil_printf("RPU: Error 0x%x in PmInit\r\n", Status);
@@ -123,8 +252,37 @@ static int InitApp(void)
 		//xil_printf("RPU: Error 0x%x in PmRtcInit\r\n", Status);
 		goto done;
 	}
-
-
+	// **ADD: Clear all IPI buffers at startup**
+	//xil_printf("RPU: Clearing IPI buffers...\r\n");
+	
+	// Clear incoming buffer (where APU writes)
+	volatile u32 *IncomingBuf = (volatile u32 *)RPU0_REQ_BUF_ADDR;
+	IncomingBuf[0] = 0;
+	IncomingBuf[1] = 0;
+	IncomingBuf[2] = 0;
+	IncomingBuf[3] = 0;
+	
+	// Clear outgoing buffer (where RPU writes to APU)
+	volatile u32 *OutgoingBuf = (volatile u32 *)APU_REQ_BUF_ADDR;
+	OutgoingBuf[0] = 0;
+	OutgoingBuf[1] = 0;
+	OutgoingBuf[2] = 0;
+	OutgoingBuf[3] = 0;
+	
+	// Flush cache
+	Xil_DCacheFlushRange((INTPTR)IncomingBuf, 16);
+	Xil_DCacheFlushRange((INTPTR)OutgoingBuf, 16);
+	
+	// Clear any pending interrupts
+	XIpiPsu_ClearInterruptStatus(&IpiInst, IPI_APU_CH_MASK);
+	/* Register custom IPI callback for APU channel */
+	Status = IpiRegisterCallback(&IpiInst, IPI_APU_CH_MASK, CustomIpiHandler);
+	if (Status != XST_SUCCESS) {
+		//xil_printf("RPU: IpiRegisterCallback failed: 0x%x\r\n", Status);
+		return Status;
+	}
+	//xil_printf("RPU: Init complete - APU mask: 0x%08X\r\n", IPI_APU_CH_MASK);
+	return XST_SUCCESS;
 done:
 	return Status;
 }
@@ -189,9 +347,83 @@ static int prepare_suspend(void)
 			goto done;
 		}
 	}
-
+    XPm_SetRequirement(NODE_IPI_APU, PM_CAP_CONTEXT, 0, REQUEST_ACK_NO);
 done:
 	return Status;
+}
+
+/* Receive IPI message with timeout */
+#if 0
+static int ReceiveIpiMessage(u32 expectedMsgType, u32 timeoutMs)
+{
+	u64 startTime = ReadTime();
+	u64 timeoutUs = (u64)timeoutMs * 1000ULL;
+	
+	ipi_msg_received = 0;
+	
+	while (1) {
+		if (ipi_msg_received) {
+			if (received_msg_type == expectedMsgType) {
+				DelayVal = received_param1;
+				IterationCnt = received_param2;
+				ipi_msg_received = 0;
+				return XST_SUCCESS;
+			} else {
+				//xil_printf("RPU: Wrong type: 0x%08X\r\n", received_msg_type);
+				ipi_msg_received = 0;
+			}
+		}
+		
+		if (CALCULATE_LATENCY(ReadTime() - startTime) >= timeoutUs) {
+			return XST_FAILURE;
+		}
+		
+		for (volatile u32 i = 0; i < 1000; i++);
+	}
+}
+#endif
+static int ReceiveIpiMessage(u32 expectedMsgType, u32 timeoutMs)
+{
+	u64 startTime = ReadTime();
+	u64 timeoutUs = (u64)timeoutMs * 1000ULL;
+	
+	ipi_msg_received = 0;
+	
+	while (1) {
+		if (ipi_msg_received) {
+			if (received_msg_type == expectedMsgType) {
+				DelayVal = received_param1;
+				IterationCnt = received_param2;
+				ipi_msg_received = 0;
+				return XST_SUCCESS;
+			} else {
+				ipi_msg_received = 0;
+			}
+		}
+		
+		// **CHANGE: Only check timeout if timeoutMs > 0**
+		if (timeoutMs > 0 && CALCULATE_LATENCY(ReadTime() - startTime) >= timeoutUs) {
+			return XST_FAILURE;
+		}
+		
+		for (volatile u32 i = 0; i < 1000; i++);
+	}
+}
+
+static int SendIpiMessage(u32 msgType, u32 param1, u32 param2)
+{
+    // Write directly to the APU's Request Buffer (Base 0xFF990000)
+    volatile u32 *ApuBuf = (volatile u32 *)0xFF990000U; 
+    ApuBuf[0] = msgType;
+    ApuBuf[1] = param1;
+    ApuBuf[2] = param2;
+    ApuBuf[3] = 0;
+
+    // Trigger BOTH bits to ensure the APU hears it
+    XIpiPsu_TriggerIpi(&IpiInst, 0x00000001U); // APU Standard
+    XIpiPsu_TriggerIpi(&IpiInst, 0x00000100U); // The bit your OBS detected
+    
+    return XST_SUCCESS;
 }
 
 int main()
@@ -277,7 +509,10 @@ int main()
 		 * it would check SYNC_RPU_FINISH from RPU and drive the testpoint low
 		 * for wakeup time measurement
 		 */
-		SyncSetMask(SYNC_RPU_MASK, SYNC_RPU_FINISH);
+        Wait(2);
+        SendIpiMessage(IPI_MSG_RPU_FINISH, 0, 0);
+
+		//SyncSetMask(SYNC_RPU_MASK, SYNC_RPU_FINISH);
 		/* Add delay to avoid print mix-up */
 		Wait(1);
 
@@ -323,16 +558,7 @@ int main()
 					      BITSTREAM_SIZE, XFPGA_FULLBIT_EN);
 		tEnd = ReadTime();
 		PlLatency = CALCULATE_LATENCY(tEnd - tStart);
-		//xil_printf("RPU: [ PL programming duration in micro seconds: %ld ]\r\n", PlLatency);
-		//if (Status == XFPGA_SUCCESS)
-		//	xil_printf("PL Configuration done successfully\n\r");
-		//else
-		//	xil_printf("PL configuration failed\n\r");
 
-		//////////////////////////////////////////////////////////////////////////////////////////////////////////////
-		// Need to re-initialize interrupt system as
-		// XFpga_Initialize() has touched the interrupt controller through underlying call to XMailbox_Initialize()
-		//
 		Status = PmInit(&GicInst, &IpiInst);
 		if (Status != XST_SUCCESS) {
 			//xil_printf("RPU: Error 0x%x in PmInit\r\n", Status);
@@ -344,6 +570,31 @@ int main()
 			//xil_printf("RPU: Error 0x%x in PmRtcInit\r\n", Status);
 			goto done;
 		}
+
+        // Re-register IPI and clear buffers
+		XIpiPsu_InterruptEnable(&IpiInst, IPI_APU_CH_MASK);
+		Status = IpiRegisterCallback(&IpiInst, IPI_APU_CH_MASK, CustomIpiHandler);
+		if (Status != XST_SUCCESS) {
+			//xil_printf("RPU: IPI re-register failed: 0x%x\r\n", Status);
+			goto done;
+		}
+		
+		// Re-configure non-cacheable
+		//ConfigureIpiBufferMemory();
+		
+		// Clear buffers
+        // **FIX: Only clear INCOMING buffer, not outgoing**
+        //xil_printf("RPU: Clearing incoming IPI buffer only...\r\n");
+        volatile u32 *InBuf = (volatile u32 *)RPU0_REQ_BUF_ADDR;
+        InBuf[0] = InBuf[1] = InBuf[2] = InBuf[3] = 0;
+		
+		//xil_printf("RPU: Resume complete\r\n");
+		
+		Xil_DCacheFlushRange((INTPTR)InBuf, 16);
+		//Xil_DCacheFlushRange((INTPTR)OutBuf, 16);
+		XIpiPsu_ClearInterruptStatus(&IpiInst, IPI_APU_CH_MASK);
+		
+		//xil_printf("RPU: Resume complete\r\n");
 		//
 		//////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -360,8 +611,16 @@ int main()
 	//xil_printf("RPU: Waiting PL_DOWN ........\r\n");
 
 	/* Waiting for PL power down command from APU */
-	SyncWaitForReady(SYNC_PL_DOWN);
-	SyncClearReady(SYNC_PL_DOWN);
+	//SyncWaitForReady(SYNC_PL_DOWN);
+	//SyncClearReady(SYNC_PL_DOWN);
+
+    Status = ReceiveIpiMessage(IPI_MSG_PL_DOWN, 1800000);
+	if (Status != XST_SUCCESS) {
+		//xil_printf("RPU: TIMEOUT\r\n");
+		goto done;
+	}
+	//xil_printf("RPU: PL_DOWN received\r\n");
+
 
 	/* Power down PL */
 	//xil_printf("RPU: Powering down PL\r\n");
@@ -372,46 +631,41 @@ int main()
 		//xil_printf("RPU: Error 0x%x in ForcePowerDown of 0x%x\r\n", Status, PL_NODE);
 		goto done;
 	}
+
 	PlLatency = CALCULATE_LATENCY(tEnd - tStart);
+    Status = SendIpiMessage(IPI_MSG_RPU_SIGNAL, 0, 0);
+    if (Status != XST_SUCCESS) 
+    {
+		//xil_printf("RPU: Failed to send ACK!\r\n");
+		goto done;
+	}
 	//xil_printf("RPU: [ PL OFF Latency in micro seconds: %ld ]\r\n", PlLatency);
 
 	/* Sync APU */
-	SyncSetMask(SYNC_RPU_MASK, SYNC_RPU_SIGNAL);
+	//SyncSetMask(SYNC_RPU_MASK, SYNC_RPU_SIGNAL);
 
 	/**********************
 	 * Get APU parameters *
 	 * ********************
 	 */
-	/* Waiting for APU parameters */
-	SyncWaitForReady(SYNC_APU_READY);
-	SyncClearReady(SYNC_APU_MASK);
+    //xil_printf("RPU: Waiting for PARAMS...\r\n");
+	Status = ReceiveIpiMessage(IPI_MSG_PARAMS, 1800000);
+	if (Status != XST_SUCCESS) goto done;
+	//xil_printf("RPU: PARAMS received - Delay:%d, Iter:%d\r\n", DelayVal, IterationCnt);
+	
+	if (DelayVal < 10U) DelayVal = 10U;
+	if (IterationCnt > 5U) IterationCnt = 5U;
+	
+	SendIpiMessage(IPI_MSG_RPU_SIGNAL, 0, 0);
+	
+	//xil_printf("RPU: Waiting for APU_FINISH...\r\n");
+	Status = ReceiveIpiMessage(IPI_MSG_APU_FINISH, 1800000);
+	if (Status != XST_SUCCESS) goto done;
+	//xil_printf("RPU: APU_FINISH received\r\n");
 
-	/* Get delay value */
-	DelayVal = SyncGetValue(SYNC_DELAY_VAL_MASK) >> SYNC_DELAY_VAL_SHIFT;
-	if (DelayVal < 10U) {
-		DelayVal = 10U;
-	}
-	//xil_printf("RPU: DelayVal = %d\r\n", DelayVal);
-
-	/* Get number of iterations for latency measurement */
-	IterationCnt = SyncGetValue(SYNC_ITERATION_CNT_MASK) >> SYNC_ITERATION_CNT_SHIFT;
-	if (IterationCnt > 5U) {
-		IterationCnt = 5U;
-	}
-	//xil_printf("RPU: IterationCnt = %d\r\n", IterationCnt);
-
-	/* Sync APU */
-	SyncSetMask(SYNC_RPU_MASK, SYNC_RPU_SIGNAL);
-
-	/************************************************
-	 * Waiting SYNC_APU_FINISH, then suspend system *
-	 * **********************************************
-	 */
-	SyncWaitForReady(SYNC_APU_FINISH);
-	SyncClearReady(SYNC_APU_MASK);
     //NODE_APU_0
 	//Status = XPm_RequestSuspend(SUSPEND_TARGET, NON_BLOCKING_ACK, LATENCY_VAL, 0);
-    Status = XPm_RequestSuspend(NODE_APU, NON_BLOCKING_ACK, LATENCY_VAL, 0); 
+    Status = XPm_RequestSuspend(NODE_APU_0, NON_BLOCKING_ACK, LATENCY_VAL, 0); 
     // TODO: Need further check this call
     
 	IpiWaitForAck();
